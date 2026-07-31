@@ -25,7 +25,7 @@ class Registration(Base):
     participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
     ticket_type_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     registration_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
-    status: Mapped[RegistrationStatus] = mapped_column(Enum(RegistrationStatus), default=RegistrationStatus.DRAFT)
+    status: Mapped[RegistrationStatus] = mapped_column(Enum(RegistrationStatus, native_enum=False), default=RegistrationStatus.DRAFT)
     dietary_preference: Mapped[str | None] = mapped_column(String(120), nullable=True)
     accessibility_requirements: Mapped[str | None] = mapped_column(Text, nullable=True)
     emergency_contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -33,4 +33,3 @@ class Registration(Base):
     consent_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
