@@ -1,0 +1,29 @@
+from fastapi import APIRouter
+
+from app.modules.events import routes as event_routes
+from app.modules.health import routes as health_routes
+from app.modules.identity import routes as identity_routes
+from app.modules.check_ins import routes as checkin_routes
+from app.modules.participants import routes as participant_routes
+from app.modules.payments import routes as payment_routes
+from app.modules.speakers import routes as speaker_routes
+from app.modules.ticket_types import routes as ticket_type_routes
+from app.modules.workshop_tracks import routes as workshop_track_routes
+from app.modules.sessions import routes as session_routes
+from app.modules.tickets import routes as ticket_routes
+from app.modules.registrations import routes as registration_routes
+
+router = APIRouter()
+
+router.include_router(health_routes.router)
+router.include_router(identity_routes.router)
+router.include_router(event_routes.router, prefix="/events", tags=["events"])
+router.include_router(participant_routes.router, tags=["participants"])
+router.include_router(checkin_routes.router)
+router.include_router(payment_routes.router)
+router.include_router(ticket_type_routes.router)
+router.include_router(workshop_track_routes.router)
+router.include_router(speaker_routes.router)
+router.include_router(session_routes.router)
+router.include_router(ticket_routes.router)
+router.include_router(registration_routes.router, tags=["registrations"])
