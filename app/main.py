@@ -1,7 +1,9 @@
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router
 from app.core.config import get_settings
@@ -32,6 +34,8 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
 
     app.include_router(router, prefix=settings.API_PREFIX)
+    Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    app.mount(settings.UPLOAD_URL_PREFIX, StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
     @app.on_event("startup")
     async def startup() -> None:

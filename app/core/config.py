@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     FRONTEND_URL: str = "http://localhost:3000"
     CORS_ORIGINS: str = '["http://localhost:3000"]'
+    UPLOAD_DIR: str = "uploads"
+    UPLOAD_URL_PREFIX: str = "/uploads"
+    PROFILE_PHOTO_MAX_SIZE_BYTES: int = 5 * 1024 * 1024
 
     def cors_origins_list(self) -> list[str]:
         value = (self.CORS_ORIGINS or "").strip()

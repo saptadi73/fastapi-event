@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db_session
@@ -53,3 +53,21 @@ async def update_speaker(
     speaker = await SpeakerService.update(db, speaker_id, payload)
     return success_response("Speaker berhasil diubah", data=speaker, request=request)
 
+
+@router.post("/{speaker_id}/photo", summary="Upload speaker photo")
+async def upload_speaker_photo(
+    request: Request,
+    speaker_id,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    from app.core.uploads import save_profile_photo
+
+    photo_url = await save_profile_photo(file, "speakers")
+    speaker = await SpeakerService.update(
+        db,
+        speaker_id,
+        schemas.SpeakerUpdate(profile_photo_url=photo_url),
+    )
+    return success_response("Foto speaker berhasil diunggah", data=speaker, request=request)

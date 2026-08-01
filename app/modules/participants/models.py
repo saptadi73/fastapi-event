@@ -22,3 +22,4 @@ class ParticipantProfile(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     organization_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     biography: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)

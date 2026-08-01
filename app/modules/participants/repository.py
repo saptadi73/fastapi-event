@@ -22,7 +22,13 @@ class ParticipantRepository:
         return profile
 
     @staticmethod
-    async def create(session: AsyncSession, *, user_id: UUID, full_name: str, organization_name: str | None, biography: str | None) -> ParticipantProfile:
+    async def list_profiles(session: AsyncSession, skip: int = 0, limit: int = 100) -> list[ParticipantProfile]:
+        stmt = select(ParticipantProfile).order_by(ParticipantProfile.full_name).offset(skip).limit(limit)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def create(session: AsyncSession, *, user_id: UUID, full_name: str, organization_name: str | None, biography: str | None, profile_photo_url: str | None = None) -> ParticipantProfile:
         existing = await ParticipantRepository.get_by_user_id(session, user_id)
         if existing:
             raise ConflictException(code="PARTICIPANT_PROFILE_EXISTS", message="Profile untuk user ini sudah ada")
@@ -32,6 +38,7 @@ class ParticipantRepository:
             full_name=full_name,
             organization_name=organization_name,
             biography=biography,
+            profile_photo_url=profile_photo_url,
         )
         session.add(profile)
         await session.commit()
@@ -49,4 +56,3 @@ class ParticipantRepository:
         await session.commit()
         await session.refresh(profile)
         return profile
-
