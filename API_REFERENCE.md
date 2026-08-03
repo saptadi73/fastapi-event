@@ -456,14 +456,14 @@ Response:
 ### `GET /tickets/{ticket_id}/qr`
 
 - Gunakan token user login. QR hanya dapat diakses oleh pemilik ticket.
+- Frontend bertanggung jawab merender QR dari `qr_token` ini (mis. library QR di sisi client).
 
 ```json
 {
   "success": true,
   "message": "QR ticket tersedia",
   "data": {
-    "qr_token": "qr-...",
-    "qr_image_url": "data:image/svg+xml;utf8,<svg>...</svg>"
+    "qr_token": "qr-..."
   }
 }
 ```
