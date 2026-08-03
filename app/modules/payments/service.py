@@ -78,8 +78,8 @@ class PaymentService:
         return await PaymentRepository.get_order(session, order_id)
 
     @staticmethod
-    async def get_invoice(session: AsyncSession, registration_id: uuid.UUID) -> schemas.InvoiceRead:
-        reg = await PaymentRepository.get_registration(session, registration_id)
+    async def get_invoice(session: AsyncSession, registration_ref: str | uuid.UUID) -> schemas.InvoiceRead:
+        reg = await PaymentRepository.get_registration(session, registration_ref)
         participant = await session.get(ParticipantProfile, reg.participant_id)
         if not participant:
             from app.core.exceptions import NotFoundException
@@ -89,7 +89,7 @@ class PaymentService:
         user = await session.get(User, participant.user_id)
         event = await session.get(Event, reg.event_id)
         ticket_type = await session.get(TicketType, reg.ticket_type_id) if reg.ticket_type_id else None
-        order = await PaymentRepository.get_latest_order(session, registration_id)
+        order = await PaymentRepository.get_latest_order(session, reg.id)
         payment = None
         if order:
             payment = await PaymentRepository.get_payment_by_order(session, order.id)

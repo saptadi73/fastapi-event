@@ -59,13 +59,13 @@ async def get_order(
     )
 
 
-@router.get("/payments/registrations/{registration_id}/invoice", summary="Get invoice by registration")
+@router.get("/payments/registrations/{registration_ref}/invoice", summary="Get invoice by registration")
 async def get_invoice(
     request: Request,
-    registration_id,
+    registration_ref: str,
     db: AsyncSession = Depends(get_db_session),
 ):
-    invoice = await PaymentService.get_invoice(db, registration_id)
+    invoice = await PaymentService.get_invoice(db, registration_ref)
     return success_response(
         "Invoice ditemukan",
         data=invoice,

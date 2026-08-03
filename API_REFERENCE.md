@@ -453,7 +453,10 @@ Response:
 }
 ```
 
-### `GET /payments/registrations/{registration_id}/invoice`
+### `GET /payments/registrations/{registration_ref}/invoice`
+
+`registration_ref` dapat berupa UUID registrasi atau nomor registrasi publik, misalnya
+`REG-AIEDU26-0005`.
 
 Response:
 

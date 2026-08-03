@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class CreateMidtransRequest(BaseModel):
@@ -18,6 +18,8 @@ class MidtransCreateResponse(BaseModel):
 
 
 class OrderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     registration_id: UUID
     order_number: str
@@ -32,6 +34,8 @@ class OrderRead(BaseModel):
 
 
 class PaymentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     order_id: UUID
     provider: str

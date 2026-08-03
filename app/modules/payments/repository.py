@@ -12,8 +12,28 @@ from app.modules.participants.models import ParticipantProfile
 
 class PaymentRepository:
     @staticmethod
-    async def get_registration(session: AsyncSession, registration_id: uuid.UUID) -> Registration:
-        reg = await session.get(Registration, registration_id)
+    async def get_registration(
+        session: AsyncSession,
+        registration_ref: str | uuid.UUID,
+    ) -> Registration:
+        """Resolve a registration by UUID or its public registration number."""
+        registration_id: uuid.UUID | None = None
+        if isinstance(registration_ref, uuid.UUID):
+            registration_id = registration_ref
+        else:
+            try:
+                registration_id = uuid.UUID(str(registration_ref))
+            except (TypeError, ValueError):
+                registration_id = None
+
+        if registration_id is not None:
+            reg = await session.get(Registration, registration_id)
+        else:
+            stmt = select(Registration).where(
+                Registration.registration_number == str(registration_ref).strip()
+            )
+            result = await session.execute(stmt)
+            reg = result.scalar_one_or_none()
         if not reg:
             raise NotFoundException(code="REGISTRATION_NOT_FOUND", message="Registrasi tidak ditemukan")
         return reg
