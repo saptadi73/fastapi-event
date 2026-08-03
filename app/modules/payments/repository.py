@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictException, NotFoundException
 from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStatus
 from app.modules.registrations.models import Registration
+from app.modules.participants.models import ParticipantProfile
 
 
 class PaymentRepository:
@@ -62,6 +63,19 @@ class PaymentRepository:
         stmt = select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc())
         result = await session.execute(stmt)
         return result.scalars().first()
+
+    @staticmethod
+    async def get_registrations_for_user(session: AsyncSession, user_id: uuid.UUID, event_id: uuid.UUID | None = None) -> list[Registration]:
+        stmt = (
+            select(Registration)
+            .join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id)
+            .where(ParticipantProfile.user_id == user_id)
+            .order_by(Registration.id.desc())
+        )
+        if event_id:
+            stmt = stmt.where(Registration.event_id == event_id)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
 
     @staticmethod
     async def create_midtrans_payment(session: AsyncSession, order: Order) -> Payment:

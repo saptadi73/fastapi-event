@@ -11,6 +11,10 @@ class CreateMidtransRequest(BaseModel):
 class MidtransCreateResponse(BaseModel):
     snap_token: str
     redirect_url: str
+    already_paid: bool = False
+    payment_id: UUID | None = None
+    order_status: str | None = None
+    requires_payment: bool = True
 
 
 class OrderRead(BaseModel):
@@ -40,3 +44,29 @@ class PaymentRead(BaseModel):
     fraud_status: str | None = None
     paid_at: datetime | None = None
 
+
+class InvoiceRegistration(BaseModel):
+    id: UUID
+    registration_number: str
+    status: str
+    event_id: UUID
+    event_name: str | None = None
+    participant_id: UUID
+    ticket_type_id: UUID | None = None
+    ticket_type_code: str | None = None
+    ticket_type_name: str | None = None
+    confirmed_at: datetime | None = None
+
+
+class InvoiceParticipant(BaseModel):
+    id: UUID
+    full_name: str
+    organization_name: str | None = None
+    email: str
+
+
+class InvoiceRead(BaseModel):
+    registration: InvoiceRegistration
+    participant: InvoiceParticipant
+    order: OrderRead | None = None
+    payment: PaymentRead | None = None
