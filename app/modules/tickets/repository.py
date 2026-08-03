@@ -4,6 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException, ConflictException
+from app.modules.participants.models import ParticipantProfile
+from app.modules.payments.models import Order, OrderStatus
+from app.modules.registrations.models import Registration
 from app.modules.registrations.repository import RegistrationRepository
 from app.modules.tickets.models import QRToken, Ticket
 from sqlalchemy import select
@@ -25,6 +28,43 @@ class TicketRepository:
         stmt = select(Ticket).where(Ticket.ticket_number == ticket_number)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def list_by_user_id(session: AsyncSession, user_id: uuid.UUID) -> list[Ticket]:
+        stmt = (
+            select(Ticket)
+            .join(Registration, Registration.id == Ticket.registration_id)
+            .join(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
+            .join(Order, Order.registration_id == Registration.id)
+            .where(
+                ParticipantProfile.user_id == user_id,
+                Order.status == OrderStatus.PAID,
+                Ticket.status == "issued",
+            )
+            .order_by(Ticket.created_at.desc())
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_owned_by_ticket_id(session: AsyncSession, ticket_id: uuid.UUID, user_id: uuid.UUID) -> Ticket:
+        stmt = (
+            select(Ticket)
+            .join(Registration, Registration.id == Ticket.registration_id)
+            .join(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
+            .join(Order, Order.registration_id == Registration.id)
+            .where(
+                Ticket.id == ticket_id,
+                ParticipantProfile.user_id == user_id,
+                Order.status == OrderStatus.PAID,
+                Ticket.status == "issued",
+            )
+        )
+        result = await session.execute(stmt)
+        ticket = result.scalar_one_or_none()
+        if not ticket:
+            raise NotFoundException(code="TICKET_NOT_FOUND", message="Ticket tidak ditemukan")
+        return ticket
 
     @staticmethod
     async def issue(session: AsyncSession, registration_id: uuid.UUID) -> Ticket:

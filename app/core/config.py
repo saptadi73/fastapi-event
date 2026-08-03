@@ -1,4 +1,3 @@
-import json
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,21 +17,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     FRONTEND_URL: str = "http://localhost:3000"
-    CORS_ORIGINS: str = '["http://localhost:3000"]'
     UPLOAD_DIR: str = "uploads"
     UPLOAD_URL_PREFIX: str = "/uploads"
     PROFILE_PHOTO_MAX_SIZE_BYTES: int = 5 * 1024 * 1024
-
-    def cors_origins_list(self) -> list[str]:
-        value = (self.CORS_ORIGINS or "").strip()
-        if not value:
-            return []
-        if value.startswith("[") and value.endswith("]"):
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return [str(item) for item in parsed]
-            return []
-        return [item.strip() for item in value.split(",") if item.strip()]
 
     PROJECT_TIMEZONE: str = "Asia/Bangkok"
 

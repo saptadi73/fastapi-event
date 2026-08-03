@@ -24,6 +24,10 @@ class TicketService:
 
     @staticmethod
     async def get_user_tickets(session: AsyncSession, user_id: uuid.UUID):
-        # placeholder for ownership query; untuk saat ini belum join profil-user
-        return []
+        tickets = await TicketRepository.list_by_user_id(session, user_id)
+        return [schemas.TicketRead.model_validate(ticket) for ticket in tickets]
 
+    @staticmethod
+    async def get_user_ticket_qr(session: AsyncSession, ticket_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, str]:
+        await TicketRepository.get_owned_by_ticket_id(session, ticket_id, user_id)
+        return await TicketService.get_qr(session, ticket_id)

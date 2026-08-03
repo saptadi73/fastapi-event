@@ -35,9 +35,10 @@ async def issue_ticket(
 async def ticket_qr(
     request: Request,
     ticket_id: UUID,
+    current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    data = await TicketService.get_qr(db, ticket_id)
+    data = await TicketService.get_user_ticket_qr(db, ticket_id, current_user.id)
     return success_response("QR ticket tersedia", data=data, request=request)
 
 
@@ -49,4 +50,3 @@ async def ticket_reissue(
 ):
     ticket = await TicketService.reissue(db, ticket_id)
     return success_response("Ticket direissue", data=ticket, request=request)
-
