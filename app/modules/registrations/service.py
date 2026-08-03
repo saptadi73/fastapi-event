@@ -24,3 +24,7 @@ class RegistrationService:
         reg = await RegistrationRepository.get_by_id(session, registration_id)
         return schemas.RegistrationRead.model_validate(reg)
 
+    @staticmethod
+    async def get_for_user(session: AsyncSession, user_id: uuid.UUID, event_id: uuid.UUID | None = None):
+        registrations = await RegistrationRepository.get_for_user(session, user_id, event_id)
+        return [schemas.RegistrationRead.model_validate(reg) for reg in registrations]

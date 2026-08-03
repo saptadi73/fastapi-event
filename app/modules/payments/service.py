@@ -9,13 +9,41 @@ from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
 from app.modules.ticket_types.models import TicketType
 from app.modules.users.models import User
+from app.core.exceptions import NotFoundException, ValidationException
 
 
 class PaymentService:
     @staticmethod
-    async def create_midtrans_session(session: AsyncSession, payload: schemas.CreateMidtransRequest) -> tuple[schemas.MidtransCreateResponse, Order]:
-        await PaymentRepository.get_registration(session, payload.registration_id)
-        latest_order = await PaymentRepository.get_latest_order(session, payload.registration_id)
+    async def create_midtrans_session(
+        session: AsyncSession,
+        payload: schemas.CreateMidtransRequest,
+        user_id: uuid.UUID,
+    ) -> tuple[schemas.MidtransCreateResponse, Order]:
+        registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+        if payload.registration_id is not None:
+            registration = next(
+                (reg for reg in registrations if reg.id == payload.registration_id),
+                None,
+            )
+            if registration is None:
+                raise ValidationException(
+                    code="REGISTRATION_NOT_OWNED",
+                    message="Registrasi tidak ditemukan untuk akun ini",
+                )
+        else:
+            payable = [
+                reg for reg in registrations
+                if getattr(reg.status, "value", reg.status) in {"awaiting_payment", "draft"}
+            ]
+            registration = payable[0] if payable else (registrations[0] if registrations else None)
+
+        if registration is None:
+            raise NotFoundException(
+                code="REGISTRATION_NOT_FOUND",
+                message="Tidak ada registrasi untuk akun ini",
+            )
+
+        latest_order = await PaymentRepository.get_latest_order(session, registration.id)
         if latest_order and latest_order.status == OrderStatus.PAID:
             latest_payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
             payment_id = latest_payment.id if latest_payment else None
@@ -47,7 +75,7 @@ class PaymentService:
                 latest_order,
             )
 
-        order = await PaymentRepository.create_order(session, payload.registration_id)
+        order = await PaymentRepository.create_order(session, registration.id)
         payment = await PaymentRepository.create_midtrans_payment(session, order)
 
         return (

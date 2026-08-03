@@ -17,9 +17,10 @@ router = APIRouter(tags=["payments"])
 async def create_midtrans_transaction(
     request: Request,
     payload: schemas.CreateMidtransRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    data, order = await PaymentService.create_midtrans_session(db, payload)
+    data, order = await PaymentService.create_midtrans_session(db, payload, current_user.id)
     message = "Midtrans transaksi berhasil dibuat"
     if data.already_paid and not data.requires_payment:
         message = "Anda sudah melakukan pembayaran"

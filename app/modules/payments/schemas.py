@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class CreateMidtransRequest(BaseModel):
-    registration_id: UUID
+    registration_id: UUID | None = None
 
 
 class MidtransCreateResponse(BaseModel):

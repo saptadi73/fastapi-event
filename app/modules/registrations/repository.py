@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.events.models import Event
+from app.modules.participants.models import ParticipantProfile
 from app.modules.registrations.models import Registration, RegistrationStatus
 
 
@@ -26,6 +27,23 @@ class RegistrationRepository:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_for_user(
+        session: AsyncSession,
+        user_id: UUID,
+        event_id: UUID | None = None,
+    ) -> list[Registration]:
+        stmt = (
+            select(Registration)
+            .join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id)
+            .where(ParticipantProfile.user_id == user_id)
+            .order_by(Registration.confirmed_at.desc().nullslast(), Registration.registration_number.desc())
+        )
+        if event_id is not None:
+            stmt = stmt.where(Registration.event_id == event_id)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def create(session: AsyncSession, **kwargs) -> Registration:
         existing = await RegistrationRepository.get_by_event_participant(
             session=session,
@@ -44,4 +62,3 @@ class RegistrationRepository:
         await session.commit()
         await session.refresh(registration)
         return registration
-
