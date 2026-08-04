@@ -18,6 +18,26 @@ class RegistrationRepository:
         return registration
 
     @staticmethod
+    async def get_by_id_and_user(
+        session: AsyncSession,
+        registration_id: UUID,
+        user_id: UUID,
+    ) -> Registration:
+        stmt = (
+            select(Registration)
+            .join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id)
+            .where(
+                Registration.id == registration_id,
+                ParticipantProfile.user_id == user_id,
+            )
+        )
+        result = await session.execute(stmt)
+        registration = result.scalar_one_or_none()
+        if not registration:
+            raise NotFoundException(code="REGISTRATION_NOT_FOUND", message="Registrasi tidak ditemukan")
+        return registration
+
+    @staticmethod
     async def get_by_event_participant(session: AsyncSession, event_id: UUID, participant_id: UUID) -> Registration | None:
         stmt = select(Registration).where(
             Registration.event_id == event_id,
@@ -56,6 +76,16 @@ class RegistrationRepository:
         event = await session.get(Event, kwargs["event_id"])
         if not event:
             raise ValidationException(code="EVENT_NOT_FOUND", message="Event tidak ditemukan")
+
+        participant = await session.get(ParticipantProfile, kwargs["participant_id"])
+        if not participant:
+            raise ValidationException(code="PARTICIPANT_NOT_FOUND", message="Profil peserta tidak ditemukan")
+        user_id = kwargs.pop("user_id", None)
+        if user_id is not None and participant.user_id != user_id:
+            raise ValidationException(
+                code="PARTICIPANT_NOT_OWNED",
+                message="Profil peserta tidak sesuai dengan akun yang login",
+            )
 
         registration = Registration(**kwargs)
         session.add(registration)

@@ -1,0 +1,70 @@
+@baseUrl = http://127.0.0.1:8000/api/v1
+
+### 1) Tanpa token - harus 401
+POST {{baseUrl}}/registrations
+Content-Type: application/json
+
+{
+  "event_id": "00000000-0000-0000-0000-000000000000",
+  "participant_id": "00000000-0000-0000-0000-000000000000"
+}
+
+### 2) Login user A
+# simpan token dari response ke bearer_a
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "rina.prameswari@example.com",
+  "password": "Password123!"
+}
+
+### 2a) Ambil profil peserta A (buat participant_id)
+GET {{baseUrl}}/participants/me
+Authorization: Bearer {{bearer_a}}
+
+### 2b) Ambil event (event slug di list)
+GET {{baseUrl}}/events?size=1
+
+### 3) Login user B
+# simpan token dari response ke bearer_b
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "joel.lim@example.com",
+  "password": "Password123!"
+}
+
+### 4) Buat registrasi dengan user A
+# gunakan event_id dari 2b dan participant_id dari 2a
+Authorization: Bearer {{bearer_a}}
+POST {{baseUrl}}/registrations
+Content-Type: application/json
+
+{
+  "event_id": "<EVENT_ID_FROM_STEP_2b>",
+  "participant_id": "<PARTICIPANT_ID_FROM_STEP_2a>",
+  "ticket_type_id": null,
+  "dietary_preference": "Vegetarian",
+  "accessibility_requirements": null,
+  "emergency_contact_name": "Budi",
+  "emergency_contact_phone": "+628123",
+  "consent_snapshot": "{}"
+}
+
+### 5) User A lihat detail registrasi (ganti <REGISTRATION_ID_USER_A>)
+GET {{baseUrl}}/registrations/<REGISTRATION_ID_USER_A>
+Authorization: Bearer {{bearer_a}}
+
+### 6) User B coba akses registrasi user A (harus 404)
+GET {{baseUrl}}/registrations/<REGISTRATION_ID_USER_A>
+Authorization: Bearer {{bearer_b}}
+
+### 7) User A list semua registrasinya
+GET {{baseUrl}}/registrations/me
+Authorization: Bearer {{bearer_a}}
+
+### 8) User A dengan format ID tidak valid (harus 422)
+GET {{baseUrl}}/registrations/invalid-id
+Authorization: Bearer {{bearer_a}}

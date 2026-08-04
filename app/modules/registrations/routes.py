@@ -16,9 +16,10 @@ router = APIRouter(prefix="/registrations")
 async def create_registration(
     request: Request,
     payload: schemas.RegistrationCreate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    registration = await RegistrationService.create_registration(db, payload)
+    registration = await RegistrationService.create_registration(db, payload, current_user.id)
     return success_response(
         "Registrasi berhasil dibuat",
         data=schemas.RegistrationRead.model_validate(registration),
@@ -44,8 +45,9 @@ async def get_my_registrations(
 @router.get("/{registration_id}", summary="Get registration")
 async def get_registration(
     request: Request,
-    registration_id,
+    registration_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    registration = await RegistrationService.get_by_id(db, registration_id)
+    registration = await RegistrationService.get_by_id(db, registration_id, current_user.id)
     return success_response("Registrasi ditemukan", data=registration, request=request)

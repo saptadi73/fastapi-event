@@ -12,16 +12,17 @@ class RegistrationService:
         return f"REG-{uuid.uuid4().hex[:12].upper()}"
 
     @staticmethod
-    async def create_registration(session: AsyncSession, payload: schemas.RegistrationCreate):
+    async def create_registration(session: AsyncSession, payload: schemas.RegistrationCreate, user_id):
         data = payload.model_dump()
         data["registration_number"] = RegistrationService._next_registration_number()
         data["status"] = RegistrationStatus.DRAFT
+        data["user_id"] = user_id
         registration = await RegistrationRepository.create(session=session, **data)
         return registration
 
     @staticmethod
-    async def get_by_id(session: AsyncSession, registration_id):
-        reg = await RegistrationRepository.get_by_id(session, registration_id)
+    async def get_by_id(session: AsyncSession, registration_id, user_id=None):
+        reg = await RegistrationRepository.get_by_id_and_user(session, registration_id, user_id)
         return schemas.RegistrationRead.model_validate(reg)
 
     @staticmethod
