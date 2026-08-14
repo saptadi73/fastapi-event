@@ -12,7 +12,7 @@ from app.modules.speakers.models import Speaker
 from app.modules.sessions.models import EventSession
 from app.modules.registrations.models import Registration
 from app.modules.tickets.models import Ticket, QRToken
-from app.modules.payments.models import Order, Payment
+from app.modules.payments.models import Order, Payment, PaymentWebhookEvent
 from app.modules.users.models import User
 from app.modules.business_matching import models as business_matching_models
 from app.modules.iwbif import models as iwbif_models

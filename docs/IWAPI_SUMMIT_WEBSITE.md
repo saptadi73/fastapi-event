@@ -464,7 +464,7 @@ After registration, participants will have access to:
 
 ## **Secure Payment**
 
-Complete your registration securely through Midtrans.
+Complete your registration securely through DOKU Checkout.
 
 ### **Accepted Payment Methods**
 
@@ -477,7 +477,7 @@ Depending on availability and country configuration:
 ·       QRIS  
 ·       GoPay  
 ·       ShopeePay  
-·       Other payment methods supported by Midtrans
+·       Other payment methods supported by DOKU
 
 ## **Order Summary**
 
@@ -507,7 +507,7 @@ Possible statuses:
 
 Do not close this page while your payment is being processed.
 
-Your registration will be confirmed after the payment system verifies the transaction.
+Your payment status will be marked as paid after DOKU verifies the transaction. Registration confirmation is completed separately by the organizer.
 
  
 
@@ -517,7 +517,7 @@ Your registration will be confirmed after the payment system verifies the transa
 
 **Thank you for joining the International Wommen Business Invesment Forum 2026**
 
-Your payment has been successfully verified and your registration is now confirmed.
+Your payment has been successfully verified. Your registration will be confirmed after organizer verification.
 
 ### **Registration Details**
 

@@ -1,7 +1,7 @@
 import uuid
 
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -46,7 +46,7 @@ class Payment(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
-    provider: Mapped[str] = mapped_column(String(20), default="midtrans")
+    provider: Mapped[str] = mapped_column(String(20), default="doku")
     provider_transaction_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     provider_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     payment_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
@@ -58,3 +58,17 @@ class Payment(Base):
     raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     paid_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expired_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PaymentWebhookEvent(Base):
+    __tablename__ = "payment_webhook_events"
+    __table_args__ = (UniqueConstraint("provider", "request_id", name="uq_payment_webhook_provider_request"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("payments.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

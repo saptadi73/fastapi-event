@@ -1,6 +1,4 @@
 import uuid
-from typing import Any
-
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,15 +11,15 @@ from app.modules.payments.service import PaymentService
 router = APIRouter(tags=["payments"])
 
 
-@router.post("/payments/midtrans/create", summary="Create Midtrans transaction")
-async def create_midtrans_transaction(
+@router.post("/payments/doku/checkout", summary="Create DOKU Checkout payment")
+async def create_doku_checkout(
     request: Request,
-    payload: schemas.CreateMidtransRequest,
+    payload: schemas.CreateDokuCheckoutRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    data, order = await PaymentService.create_midtrans_session(db, payload, current_user.id)
-    message = "Midtrans transaksi berhasil dibuat"
+    data, order = await PaymentService.create_doku_checkout(db, payload, current_user.id)
+    message = "DOKU Checkout berhasil dibuat"
     if data.already_paid and not data.requires_payment:
         message = "Anda sudah melakukan pembayaran"
     return success_response(
@@ -93,11 +91,11 @@ async def get_my_invoices(
     )
 
 
-@router.post("/webhooks/midtrans", summary="Midtrans webhook")
-async def midtrans_webhook(
+@router.post("/webhooks/doku", summary="DOKU payment notification")
+async def doku_notification(
     request: Request,
-    payload: dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
 ):
-    result = await PaymentService.handle_midtrans_webhook(db, payload)
-    return success_response("Webhook diproses", data={"result": result}, request=request)
+    body = await request.body()
+    result = await PaymentService.handle_doku_notification(db, body, dict(request.headers))
+    return success_response("Notifikasi DOKU diproses", data={"result": result}, request=request)

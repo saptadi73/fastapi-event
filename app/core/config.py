@@ -23,6 +23,14 @@ class Settings(BaseSettings):
 
     PROJECT_TIMEZONE: str = "Asia/Jakarta"
 
+    DOKU_CLIENT_ID: str = ""
+    DOKU_SECRET_KEY: str = ""
+    DOKU_BASE_URL: str = "https://api-sandbox.doku.com"
+    DOKU_CHECKOUT_PATH: str = "/checkout/v1/payment"
+    DOKU_PAYMENT_DUE_MINUTES: int = 60
+    DOKU_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku"
+    DOKU_CALLBACK_URL: str = "http://localhost:3000/payment/result"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,

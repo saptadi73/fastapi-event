@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictException, NotFoundException
-from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStatus
+from app.core.exceptions import ConflictException, NotFoundException, ValidationException
+from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
 from app.modules.registrations.models import Registration
 from app.modules.participants.models import ParticipantProfile
 
@@ -61,8 +61,10 @@ class PaymentRepository:
             .join(DelegateRegistrationDetail, DelegateRegistrationDetail.delegate_package_id == DelegatePackage.id)
             .where(DelegateRegistrationDetail.registration_id == registration_id)
         )).scalar_one_or_none()
-        subtotal = package_row.amount if package_row else 100000
-        currency = package_row.currency if package_row else "IDR"
+        if not package_row:
+            raise ValidationException("DELEGATE_PACKAGE_NOT_FOUND", "Paket delegate registrasi tidak ditemukan")
+        subtotal = package_row.amount
+        currency = package_row.currency
         order = Order(
             registration_id=registration_id,
             order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
@@ -107,10 +109,10 @@ class PaymentRepository:
         return list(result.scalars().all())
 
     @staticmethod
-    async def create_midtrans_payment(session: AsyncSession, order: Order) -> Payment:
+    async def create_doku_payment(session: AsyncSession, order: Order) -> Payment:
         payment = Payment(
             order_id=order.id,
-            provider="midtrans",
+            provider="doku",
             gross_amount=order.total_amount,
             currency=order.currency,
             transaction_status=PaymentStatus.CREATED,
@@ -119,3 +121,15 @@ class PaymentRepository:
         await session.commit()
         await session.refresh(payment)
         return payment
+
+    @staticmethod
+    async def get_order_by_number(session: AsyncSession, order_number: str, lock: bool = False) -> Order | None:
+        stmt = select(Order).where(Order.order_number == order_number)
+        if lock:
+            stmt = stmt.with_for_update()
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def get_webhook_event(session: AsyncSession, request_id: str) -> PaymentWebhookEvent | None:
+        stmt = select(PaymentWebhookEvent).where(PaymentWebhookEvent.provider == "doku", PaymentWebhookEvent.request_id == request_id)
+        return (await session.execute(stmt)).scalar_one_or_none()

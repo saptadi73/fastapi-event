@@ -4,13 +4,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-class CreateMidtransRequest(BaseModel):
+class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
 
 
-class MidtransCreateResponse(BaseModel):
-    snap_token: str
-    redirect_url: str
+class DokuCheckoutResponse(BaseModel):
+    payment_url: str
+    token: str | None = None
+    expires_at: datetime | None = None
     already_paid: bool = False
     payment_id: UUID | None = None
     order_status: str | None = None
@@ -47,6 +48,7 @@ class PaymentRead(BaseModel):
     transaction_status: str
     fraud_status: str | None = None
     paid_at: datetime | None = None
+    checkout_url: str | None = None
 
 
 class InvoiceRegistration(BaseModel):

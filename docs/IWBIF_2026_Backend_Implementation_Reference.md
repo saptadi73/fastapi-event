@@ -593,6 +593,19 @@ Form 1 mengumpulkan business matching secara ringkas. Form 2 mengumpulkan profil
 
 `Preferred Payment Method` adalah pilihan peserta, sedangkan status pembayaran aktual harus berasal dari payment transaction/payment gateway. Jangan menganggap pilihan `Credit Card`, `Bank Transfer`, atau metode lain sebagai bukti bahwa pembayaran telah berhasil.
 
+Gateway yang digunakan adalah **DOKU Checkout Non-SNAP**. Frontend hanya
+meminta pembuatan Checkout kepada backend dan menerima `payment_url`; Client ID,
+Secret Key, request signature, dan notification verification sepenuhnya menjadi
+tanggung jawab backend. HTTP Notification DOKU adalah source of truth status
+pembayaran. Callback browser hanya untuk navigasi dan tidak boleh langsung
+menandai transaksi berhasil.
+
+DOKU Checkout mensyaratkan nominal IDR tanpa desimal. Karena harga sumber paket
+IWBIF masih USD, nominal charge IDR Package A/B/C harus ditetapkan sebagai data
+master bisnis. Frontend dilarang melakukan konversi kurs atau mengirim nominal.
+
+Lihat `FRONTEND_DOKU_PAYMENT_INTEGRATION.md` untuk kontrak frontend.
+
 ## Data Security
 
 Passport dan data special requirements membutuhkan authorization ketat. File tidak sebaiknya memiliki public URL permanen. Gunakan protected download atau signed/temporary URL bila storage mendukungnya.

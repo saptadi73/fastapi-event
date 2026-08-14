@@ -19,10 +19,15 @@ Kelompok endpoint utama:
 - `GET|POST /api/v1/events/{event_id}/conversations` — conversation dalam event.
 - `GET /api/v1/conversations/{conversation_id}/messages` — pesan conversation.
 - `GET /api/v1/notifications` — notification center.
-- `POST /api/v1/payments/midtrans/create` — membuat sesi pembayaran.
+- `POST /api/v1/payments/doku/checkout` — membuat DOKU Checkout.
+- `POST /api/v1/webhooks/doku` — notifikasi pembayaran DOKU terverifikasi.
 - `GET /api/v1/tickets/me` — tiket milik participant.
 - `GET /api/v1/check-ins` — daftar check-in.
 - `/api/v1/admin/*` — operasi organizer yang dilindungi role.
 
 Seluruh identifier resource menggunakan UUID. Response mengikuti envelope
 `success`, `message`, `data`, `meta`, `request_id`, dan `timestamp`.
+
+Kontrak penggunaan DOKU dari aplikasi frontend, termasuk request/response,
+redirect, callback, polling status, error handling, dan TypeScript interface,
+tersedia di `docs/FRONTEND_DOKU_PAYMENT_INTEGRATION.md`.
