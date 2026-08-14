@@ -56,9 +56,9 @@ class InvoiceRegistration(BaseModel):
     event_id: UUID
     event_name: str | None = None
     participant_id: UUID
-    ticket_type_id: UUID | None = None
-    ticket_type_code: str | None = None
-    ticket_type_name: str | None = None
+    delegate_package_id: UUID | None = None
+    delegate_package_code: str | None = None
+    delegate_package_name: str | None = None
     confirmed_at: datetime | None = None
 
 

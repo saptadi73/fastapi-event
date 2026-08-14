@@ -12,21 +12,6 @@ from app.modules.registrations.service import RegistrationService
 router = APIRouter(prefix="/registrations")
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, summary="Create registration")
-async def create_registration(
-    request: Request,
-    payload: schemas.RegistrationCreate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
-):
-    registration = await RegistrationService.create_registration(db, payload, current_user.id)
-    return success_response(
-        "Registrasi berhasil dibuat",
-        data=schemas.RegistrationRead.model_validate(registration),
-        request=request,
-    )
-
-
 @router.get("/me", summary="Get registrations for current user")
 async def get_my_registrations(
     request: Request,

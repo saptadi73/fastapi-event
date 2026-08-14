@@ -3,8 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_db_session
 from app.support.responses import success_response
-from app.modules.workshop_tracks.service import WorkshopTrackService
-from app.modules.ticket_types.service import TicketTypeService
 from app.modules.sessions import schemas as session_schemas
 from app.modules.sessions.service import SessionService
 from app.modules.speakers import schemas as speaker_schemas
@@ -59,28 +57,6 @@ async def get_event_speakers(
     speakers = await SpeakerService.list_featured(db, size=100)
     data = [speaker_schemas.SpeakerRead.model_validate(row) for row in speakers]
     return success_response("Speaker event ditemukan", data=data, request=request)
-
-
-@router.get("/{slug}/ticket-types", summary="Get event ticket types by slug")
-async def get_event_ticket_types(
-    request: Request,
-    slug: str,
-    db: AsyncSession = Depends(get_db_session),
-):
-    event = await EventService.get_by_slug(db, slug)
-    data = await TicketTypeService.list_by_event(db, event.id)
-    return success_response("Ticket type event ditemukan", data=data, request=request)
-
-
-@router.get("/{slug}/workshop-tracks", summary="Get event workshop tracks by slug")
-async def get_event_workshop_tracks(
-    request: Request,
-    slug: str,
-    db: AsyncSession = Depends(get_db_session),
-):
-    event = await EventService.get_by_slug(db, slug)
-    data = await WorkshopTrackService.list_by_event(db, event.id)
-    return success_response("Workshop track event ditemukan", data=data, request=request)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Create event")

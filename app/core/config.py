@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "ASEAN AI Event Portal"
+    APP_NAME: str = "IWBIF 2026 Event Portal"
     APP_ENV: str = "development"
     APP_DEBUG: bool = False
     API_PREFIX: str = "/api/v1"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     UPLOAD_URL_PREFIX: str = "/uploads"
     PROFILE_PHOTO_MAX_SIZE_BYTES: int = 5 * 1024 * 1024
 
-    PROJECT_TIMEZONE: str = "Asia/Bangkok"
+    PROJECT_TIMEZONE: str = "Asia/Jakarta"
 
     model_config = SettingsConfigDict(
         env_file=".env",

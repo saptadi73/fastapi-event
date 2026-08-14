@@ -16,7 +16,7 @@ def create_app() -> FastAPI:
     validate_python_version()
     settings = get_settings()
     app = FastAPI(
-        title="ASEAN AI Event Portal API",
+        title="IWBIF 2026 Event Portal API",
         debug=settings.APP_DEBUG,
         version="1.0.0",
     )

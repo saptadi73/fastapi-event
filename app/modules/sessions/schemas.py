@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class SessionBase(BaseModel):
     event_id: UUID
-    workshop_track_id: UUID | None = None
     title: str = Field(min_length=2, max_length=255)
     slug: str = Field(min_length=2, max_length=160)
     description: str | None = None
@@ -36,4 +35,3 @@ class SessionRead(SessionBase):
     id: UUID
 
     model_config = ConfigDict(from_attributes=True)
-

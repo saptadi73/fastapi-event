@@ -12,7 +12,6 @@ class SpeakerBase(BaseModel):
     biography: str | None = None
     profile_photo_url: str | None = None
     linkedin_url: str | None = None
-    github_url: str | None = None
     website_url: str | None = None
     expertise_tags: list[str] | None = None
     is_featured: bool = False

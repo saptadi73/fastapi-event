@@ -10,7 +10,7 @@ class EventBase(BaseModel):
     description: str | None = None
     venue_name: str | None = None
     venue_address: str | None = None
-    timezone: str = "Asia/Bangkok"
+    timezone: str = "Asia/Jakarta"
     start_at: datetime
     end_at: datetime
     capacity: int = Field(ge=1)
@@ -34,4 +34,3 @@ class EventRead(EventBase):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
-

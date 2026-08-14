@@ -54,15 +54,24 @@ class PaymentRepository:
         if existing and existing.status in [OrderStatus.PENDING, OrderStatus.DRAFT]:
             raise ConflictException(code="ORDER_EXISTS", message="Order aktif sudah ada")
 
+        # IWBIF price is always resolved server-side from the selected package.
+        from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
+        package_row = (await session.execute(
+            select(DelegatePackage)
+            .join(DelegateRegistrationDetail, DelegateRegistrationDetail.delegate_package_id == DelegatePackage.id)
+            .where(DelegateRegistrationDetail.registration_id == registration_id)
+        )).scalar_one_or_none()
+        subtotal = package_row.amount if package_row else 100000
+        currency = package_row.currency if package_row else "IDR"
         order = Order(
             registration_id=registration_id,
             order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
-            subtotal=100000,
+            subtotal=subtotal,
             discount_amount=0,
             tax_amount=0,
             service_fee=0,
-            total_amount=100000,
-            currency="IDR",
+            total_amount=subtotal,
+            currency=currency,
             status=OrderStatus.PENDING,
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=45),
         )

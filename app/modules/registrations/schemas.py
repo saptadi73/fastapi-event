@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class RegistrationBase(BaseModel):
     event_id: UUID
     participant_id: UUID
-    ticket_type_id: UUID | None = None
     dietary_preference: str | None = None
     accessibility_requirements: str | None = None
     emergency_contact_name: str | None = None
@@ -32,4 +31,3 @@ class RegistrationRead(BaseModel):
     confirmed_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
-

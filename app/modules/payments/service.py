@@ -7,7 +7,7 @@ from app.modules.payments.models import Order, OrderStatus
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
-from app.modules.ticket_types.models import TicketType
+from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
 from app.modules.users.models import User
 from app.core.exceptions import NotFoundException, ValidationException
 
@@ -33,7 +33,7 @@ class PaymentService:
         else:
             payable = [
                 reg for reg in registrations
-                if getattr(reg.status, "value", reg.status) in {"awaiting_payment", "draft"}
+                if getattr(reg.status, "value", reg.status) in {"awaiting_payment", "payment_pending", "verified", "draft"}
             ]
             registration = payable[0] if payable else (registrations[0] if registrations else None)
 
@@ -116,7 +116,8 @@ class PaymentService:
 
         user = await session.get(User, participant.user_id)
         event = await session.get(Event, reg.event_id)
-        ticket_type = await session.get(TicketType, reg.ticket_type_id) if reg.ticket_type_id else None
+        detail = await session.get(DelegateRegistrationDetail, reg.id)
+        package = await session.get(DelegatePackage, detail.delegate_package_id) if detail else None
         order = await PaymentRepository.get_latest_order(session, reg.id)
         payment = None
         if order:
@@ -137,9 +138,9 @@ class PaymentService:
                 event_id=reg.event_id,
                 event_name=event.name if event else None,
                 participant_id=reg.participant_id,
-                ticket_type_id=reg.ticket_type_id,
-                ticket_type_code=ticket_type.code if ticket_type else None,
-                ticket_type_name=ticket_type.name if ticket_type else None,
+                delegate_package_id=package.id if package else None,
+                delegate_package_code=package.code if package else None,
+                delegate_package_name=package.name if package else None,
                 confirmed_at=reg.confirmed_at,
             ),
             participant=schemas.InvoiceParticipant(
@@ -165,7 +166,8 @@ class PaymentService:
                 continue
             user = await session.get(User, participant.user_id)
             event = await session.get(Event, reg.event_id)
-            ticket_type = await session.get(TicketType, reg.ticket_type_id) if reg.ticket_type_id else None
+            detail = await session.get(DelegateRegistrationDetail, reg.id)
+            package = await session.get(DelegatePackage, detail.delegate_package_id) if detail else None
             order = await PaymentRepository.get_latest_order(session, reg.id)
             payment = await PaymentRepository.get_payment_by_order(session, order.id) if order else None
 
@@ -176,9 +178,9 @@ class PaymentService:
                 event_id=reg.event_id,
                 event_name=event.name if event else None,
                 participant_id=reg.participant_id,
-                ticket_type_id=reg.ticket_type_id,
-                ticket_type_code=ticket_type.code if ticket_type else None,
-                ticket_type_name=ticket_type.name if ticket_type else None,
+                delegate_package_id=package.id if package else None,
+                delegate_package_code=package.code if package else None,
+                delegate_package_name=package.name if package else None,
                 confirmed_at=reg.confirmed_at,
             )
             participant_info = schemas.InvoiceParticipant(

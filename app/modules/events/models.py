@@ -33,7 +33,7 @@ class Event(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     venue_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     venue_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Bangkok")
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Jakarta")
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, default=0)

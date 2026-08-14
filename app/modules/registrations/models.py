@@ -10,9 +10,16 @@ from app.core.database import Base
 
 class RegistrationStatus(str, PyEnum):
     DRAFT = "draft"
+    SUBMITTED = "submitted"
+    UNDER_VERIFICATION = "under_verification"
+    VERIFIED = "verified"
+    PAYMENT_PENDING = "payment_pending"
+    PAID = "paid"
     WAITING_PAYMENT = "awaiting_payment"
     CONFIRMED = "confirmed"
+    REJECTED = "rejected"
     CANCELED = "canceled"
+    CANCELLED = "cancelled"
     EXPIRED = "expired"
 
 
@@ -23,7 +30,6 @@ class Registration(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id"), nullable=False)
     participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
-    ticket_type_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     registration_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     status: Mapped[RegistrationStatus] = mapped_column(Enum(RegistrationStatus, native_enum=False), default=RegistrationStatus.DRAFT)
     dietary_preference: Mapped[str | None] = mapped_column(String(120), nullable=True)

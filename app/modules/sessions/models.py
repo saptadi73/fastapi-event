@@ -14,7 +14,6 @@ class EventSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id"), nullable=False)
-    workshop_track_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

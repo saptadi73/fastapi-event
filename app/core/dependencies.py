@@ -35,3 +35,8 @@ async def get_current_user_payload(authorization: str | None = Header(default=No
     token = authorization.removeprefix("Bearer ").strip()
     return decode_token(token)
 
+
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in {"admin", "organizer"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organizer role required")
+    return current_user

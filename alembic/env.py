@@ -9,12 +9,13 @@ from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
 from app.modules.check_ins.models import CheckIn
 from app.modules.speakers.models import Speaker
-from app.modules.ticket_types.models import TicketType
 from app.modules.sessions.models import EventSession
-from app.modules.workshop_tracks.models import WorkshopTrack
 from app.modules.registrations.models import Registration
 from app.modules.tickets.models import Ticket, QRToken
 from app.modules.payments.models import Order, Payment
+from app.modules.users.models import User
+from app.modules.business_matching import models as business_matching_models
+from app.modules.iwbif import models as iwbif_models
 
 config = context.config
 fileConfig(config.config_file_name)
