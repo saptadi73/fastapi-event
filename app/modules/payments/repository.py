@@ -63,8 +63,10 @@ class PaymentRepository:
         )).scalar_one_or_none()
         if not package_row:
             raise ValidationException("DELEGATE_PACKAGE_NOT_FOUND", "Paket delegate registrasi tidak ditemukan")
-        subtotal = package_row.amount
-        currency = package_row.currency
+        # Keep the documented package display price (often USD) separate from
+        # the fixed amount charged by Indonesian payment rails.
+        subtotal = package_row.payment_amount_idr if package_row.payment_amount_idr is not None else package_row.amount
+        currency = "IDR" if package_row.payment_amount_idr is not None else package_row.currency
         order = Order(
             registration_id=registration_id,
             order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
@@ -94,6 +96,23 @@ class PaymentRepository:
         stmt = select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc())
         result = await session.execute(stmt)
         return result.scalars().first()
+
+    @staticmethod
+    async def get_payment_by_va(session: AsyncSession, virtual_account_no: str, lock: bool = False) -> Payment | None:
+        stmt = select(Payment).where(Payment.virtual_account_no == virtual_account_no)
+        if lock:
+            stmt = stmt.with_for_update()
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def get_payment_for_user(session: AsyncSession, payment_id: uuid.UUID, user_id: uuid.UUID) -> Payment | None:
+        stmt = (select(Payment).join(Order, Payment.order_id == Order.id).join(Registration, Order.registration_id == Registration.id).join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Payment.id == payment_id, ParticipantProfile.user_id == user_id))
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def get_order_for_user(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID) -> Order | None:
+        stmt = (select(Order).join(Registration, Order.registration_id == Registration.id).join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Order.id == order_id, ParticipantProfile.user_id == user_id))
+        return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def get_registrations_for_user(session: AsyncSession, user_id: uuid.UUID, event_id: uuid.UUID | None = None) -> list[Registration]:
@@ -130,6 +149,6 @@ class PaymentRepository:
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
-    async def get_webhook_event(session: AsyncSession, request_id: str) -> PaymentWebhookEvent | None:
-        stmt = select(PaymentWebhookEvent).where(PaymentWebhookEvent.provider == "doku", PaymentWebhookEvent.request_id == request_id)
+    async def get_webhook_event(session: AsyncSession, request_id: str, provider: str = "doku") -> PaymentWebhookEvent | None:
+        stmt = select(PaymentWebhookEvent).where(PaymentWebhookEvent.provider == provider, PaymentWebhookEvent.request_id == request_id)
         return (await session.execute(stmt)).scalar_one_or_none()

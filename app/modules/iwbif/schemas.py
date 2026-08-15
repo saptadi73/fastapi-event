@@ -71,7 +71,7 @@ class DelegateRegistrationRead(BaseModel):
 
 
 class PackageRead(BaseModel):
-    id: UUID; event_id: UUID; code: str; name: str; currency: str; amount: float; is_active: bool
+    id: UUID; event_id: UUID; code: str; name: str; currency: str; amount: float; payment_amount_idr: float | None = None; is_active: bool
     model_config = ConfigDict(from_attributes=True)
 
 class ActivityRead(BaseModel):
@@ -87,6 +87,7 @@ class PackageWrite(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     amount: float = Field(gt=0)
+    payment_amount_idr: float | None = Field(default=None, gt=0)
     is_active: bool = True
 
 class ActivityWrite(BaseModel):

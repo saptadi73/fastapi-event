@@ -59,6 +59,11 @@ class Payment(Base):
     paid_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expired_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    channel_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    virtual_account_no: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_reference_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payment_instructions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PaymentWebhookEvent(Base):

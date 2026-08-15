@@ -8,6 +8,24 @@ class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
 
 
+class CreateDokuDirectVARequest(BaseModel):
+    registration_id: UUID
+    bank_code: str
+
+
+class DokuDirectVAResponse(BaseModel):
+    payment_id: UUID
+    order_id: UUID
+    order_number: str
+    status: str
+    bank_code: str
+    virtual_account_no: str
+    amount: float
+    currency: str
+    expires_at: datetime | None = None
+    instructions_url: str | None = None
+
+
 class DokuCheckoutResponse(BaseModel):
     payment_url: str
     token: str | None = None
@@ -49,6 +67,10 @@ class PaymentRead(BaseModel):
     fraud_status: str | None = None
     paid_at: datetime | None = None
     checkout_url: str | None = None
+    channel_code: str | None = None
+    virtual_account_no: str | None = None
+    provider_reference_no: str | None = None
+    payment_instructions_url: str | None = None
 
 
 class InvoiceRegistration(BaseModel):

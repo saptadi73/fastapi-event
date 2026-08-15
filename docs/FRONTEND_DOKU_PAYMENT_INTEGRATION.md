@@ -1,5 +1,28 @@
 # Frontend Integration — DOKU Checkout
 
+> Integrasi utama IWBIF sekarang menggunakan **DOKU Direct API SNAP Virtual
+> Account**. DOKU Checkout dipertahankan hanya sebagai fallback.
+
+## Direct VA flow
+
+`GET /api/v1/payments/doku/direct/methods` mengembalikan bank yang tersedia.
+
+```http
+POST /api/v1/payments/doku/direct/va
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"registration_id":"<uuid>","bank_code":"BCA"}
+```
+
+Respons menyediakan `payment_id`, `order_id`, `order_number`, `status`,
+`bank_code`, `virtual_account_no`, `amount`, `currency`, `expires_at`, dan
+`instructions_url`. Frontend menampilkan nomor VA dan melakukan polling ke
+`GET /api/v1/payments/{payment_id}` hingga `transaction_status` menjadi
+`success`. Frontend tidak boleh mengirim nominal atau memanggil webhook.
+
+## DOKU Checkout lama (fallback)
+
 Dokumen ini adalah kontrak integrasi frontend untuk pembayaran IWBIF 2026.
 OpenAPI backend tersedia di `/openapi.json`, sedangkan seluruh endpoint aplikasi
 menggunakan prefix `/api/v1`.

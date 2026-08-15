@@ -1,5 +1,17 @@
 # IWBIF 2026 API Reference
 
+## DOKU Direct API SNAP
+
+- `GET /api/v1/payments/doku/direct/methods` — daftar bank VA terkonfigurasi.
+- `POST /api/v1/payments/doku/direct/va` — membuat VA Close Amount (JWT user wajib).
+- `GET /api/v1/payments/{payment_id}` — membaca status pembayaran.
+- `POST /api/v1/doku/snap/authorization/v1/access-token/b2b` — Token URL untuk callback DOKU.
+- `POST /api/v1/webhooks/doku/snap/va/payment` — Notification URL VA SNAP.
+
+Payload pembuatan VA: `{"registration_id":"UUID","bank_code":"BCA"}`.
+Nominal selalu berasal dari `delegate_packages.payment_amount_idr`; frontend tidak
+boleh mengirim atau menghitung nominal pembayaran.
+
 OpenAPI merupakan referensi endpoint yang kanonik dan dapat dibuka melalui
 `GET /openapi.json` atau antarmuka `/docs`.
 
@@ -18,6 +30,11 @@ Kelompok endpoint utama:
 - `GET|POST /api/v1/events/{event_id}/meetings` — permintaan dan jadwal meeting.
 - `GET|POST /api/v1/events/{event_id}/conversations` — conversation dalam event.
 - `GET /api/v1/conversations/{conversation_id}/messages` — pesan conversation.
+- `POST /api/v1/conversations/{conversation_id}/messages` — kirim pesan/reply.
+- `PATCH|DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}` — edit/soft-delete pesan sendiri.
+- `POST /api/v1/conversations/{conversation_id}/read` — read receipt.
+- `GET /api/v1/messages/unread-count` — badge unread message.
+- `WS /api/v1/ws/conversations/{conversation_id}?token=<JWT>` — event messaging realtime.
 - `GET /api/v1/notifications` — notification center.
 - `POST /api/v1/payments/doku/checkout` — membuat DOKU Checkout.
 - `POST /api/v1/webhooks/doku` — notifikasi pembayaran DOKU terverifikasi.

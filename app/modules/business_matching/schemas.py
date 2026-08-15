@@ -55,6 +55,10 @@ class MessageCreate(BaseModel):
     reply_to_message_id: UUID | None = None
 
 
+class MessageUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+
+
 class MessageRead(BaseModel):
     id: UUID
     conversation_id: UUID
@@ -64,7 +68,21 @@ class MessageRead(BaseModel):
     meeting_id: UUID | None
     reply_to_message_id: UUID | None
     created_at: datetime
+    edited_at: datetime | None = None
+    deleted_at: datetime | None = None
     model_config = ConfigDict(from_attributes=True)
+
+
+class ConversationRead(BaseModel):
+    id: UUID
+    event_id: UUID
+    status: str
+    last_message_at: datetime | None = None
+    unread_count: int = 0
+    other_participant_id: UUID
+    other_participant_name: str
+    other_participant_photo_url: str | None = None
+    last_message: MessageRead | None = None
 
 
 class MeetingCreate(BaseModel):

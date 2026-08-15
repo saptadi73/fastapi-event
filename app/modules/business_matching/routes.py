@@ -1,14 +1,19 @@
+from datetime import datetime, timezone
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user, get_db_session
+from app.core.database import AsyncSessionFactory
+from app.core.security import decode_token
 from app.modules.users.models import User
+from app.modules.users.repository import UserRepository
 from app.support.responses import success_response
 from . import schemas
 from .models import ConversationParticipant, MatchingSession, Meeting, MeetingSlot, Notification, ParticipantBlock, ParticipantReport
 from .repository import BusinessMatchingRepository as Repo
 from .service import BusinessMatchingService as Service
+from .realtime import conversation_hub
 
 router = APIRouter()
 
@@ -40,29 +45,78 @@ async def create_conversation(event_id: UUID, payload: schemas.ConversationCreat
 @router.get("/events/{event_id}/conversations")
 async def conversations(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     me = await Service.context(db, user.id, event_id); rows = await Repo.conversations(db, event_id, me.id)
-    data = [{"id": c.id, "status": c.status, "last_message_at": c.last_message_at, "unread_count": len([m for m in await Repo.messages(db, c.id) if cp.last_read_at is None or m.created_at > cp.last_read_at])} for c, cp in rows]
+    data = []
+    for conversation, membership in rows:
+        other, last, unread = await Repo.conversation_summary(db, conversation, membership, me.id)
+        if other:
+            data.append(schemas.ConversationRead(id=conversation.id, event_id=conversation.event_id, status=conversation.status.value if hasattr(conversation.status, "value") else conversation.status, last_message_at=conversation.last_message_at, unread_count=unread, other_participant_id=other.id, other_participant_name=other.full_name, other_participant_photo_url=other.profile_photo_url, last_message=schemas.MessageRead.model_validate(last) if last else None))
     return success_response("Daftar conversation berhasil diambil", data, request=request)
 
 @router.get("/conversations/{conversation_id}/messages")
-async def messages(conversation_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+async def messages(conversation_id: UUID, request: Request, limit: int = Query(50, ge=1, le=100), before: datetime | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     await Service.require_conversation(db, user.id, conversation_id)
-    return success_response("Daftar pesan berhasil diambil", [schemas.MessageRead.model_validate(x) for x in await Repo.messages(db, conversation_id)], request=request)
+    rows = await Repo.messages(db, conversation_id, limit, before)
+    return success_response("Daftar pesan berhasil diambil", [schemas.MessageRead.model_validate(x) for x in rows], {"limit": limit, "has_more": len(rows) == limit, "next_before": rows[0].created_at.isoformat() if len(rows) == limit else None}, request)
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
 async def send_message(conversation_id: UUID, payload: schemas.MessageCreate, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     return success_response("Pesan berhasil dikirim", schemas.MessageRead.model_validate(await Service.send_message(db, user.id, conversation_id, payload)), request=request)
 
+@router.patch("/conversations/{conversation_id}/messages/{message_id}")
+async def edit_message(conversation_id: UUID, message_id: UUID, payload: schemas.MessageUpdate, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    return success_response("Pesan berhasil diperbarui", schemas.MessageRead.model_validate(await Service.edit_message(db, user.id, conversation_id, message_id, payload)), request=request)
+
+@router.delete("/conversations/{conversation_id}/messages/{message_id}")
+async def delete_message(conversation_id: UUID, message_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    await Service.delete_message(db, user.id, conversation_id, message_id)
+    return success_response("Pesan berhasil dihapus", request=request)
+
+@router.get("/messages/unread-count")
+async def unread_messages(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    me = await Service.context(db, user.id)
+    return success_response("Unread message count berhasil diambil", {"count": await Repo.total_unread_messages(db, me.id)}, request=request)
+
 @router.post("/conversations/{conversation_id}/read")
 async def read(conversation_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     me, _ = await Service.require_conversation(db, user.id, conversation_id); cp = await Repo.conversation_member(db, conversation_id, me.id)
-    from datetime import datetime, timezone
     cp.last_read_at = datetime.now(timezone.utc); await db.commit()
+    await conversation_hub.broadcast(conversation_id, {"type": "read_update", "conversation_id": str(conversation_id), "participant_id": str(me.id), "read_at": cp.last_read_at.isoformat()})
     return success_response("Conversation ditandai sudah dibaca", request=request)
 
 @router.post("/conversations/{conversation_id}/archive")
 async def archive(conversation_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     me, _ = await Service.require_conversation(db, user.id, conversation_id); cp = await Repo.conversation_member(db, conversation_id, me.id); cp.is_archived = True; await db.commit()
     return success_response("Conversation berhasil diarsipkan", request=request)
+
+@router.post("/conversations/{conversation_id}/unarchive")
+async def unarchive(conversation_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    me, _ = await Service.require_conversation(db, user.id, conversation_id); cp = await Repo.conversation_member(db, conversation_id, me.id); cp.is_archived = False; await db.commit()
+    return success_response("Conversation berhasil dikembalikan", request=request)
+
+@router.websocket("/ws/conversations/{conversation_id}")
+async def conversation_websocket(websocket: WebSocket, conversation_id: UUID):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401); return
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access": raise ValueError("invalid token")
+        async with AsyncSessionFactory() as db:
+            user = await UserRepository.get_by_id(db, payload.get("sub"))
+            if not user: raise ValueError("invalid user")
+            await Service.require_conversation(db, user.id, conversation_id)
+    except Exception:
+        await websocket.close(code=4403); return
+    await conversation_hub.connect(conversation_id, websocket)
+    try:
+        await websocket.send_json({"type": "connected", "conversation_id": str(conversation_id)})
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "ping": await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await conversation_hub.disconnect(conversation_id, websocket)
 
 @router.post("/events/{event_id}/meetings", status_code=201)
 async def create_meeting(event_id: UUID, payload: schemas.MeetingCreate, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):

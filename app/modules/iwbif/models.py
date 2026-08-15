@@ -14,6 +14,7 @@ class DelegatePackage(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    payment_amount_idr: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

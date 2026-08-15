@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.participants.models import ParticipantProfile
 from app.modules.registrations.models import Registration, RegistrationStatus
@@ -46,8 +47,38 @@ class BusinessMatchingRepository:
         return list((await db.execute(q)).all())
 
     @staticmethod
-    async def messages(db, conversation_id):
-        return list((await db.execute(select(Message).where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None)).order_by(Message.created_at))).scalars())
+    async def direct_conversation(db, event_id, first_id, second_id):
+        mine = aliased(ConversationParticipant)
+        other = aliased(ConversationParticipant)
+        q = (select(Conversation).join(mine, mine.conversation_id == Conversation.id).join(other, other.conversation_id == Conversation.id).where(Conversation.event_id == event_id, mine.participant_id == first_id, other.participant_id == second_id, Conversation.status == "active"))
+        return (await db.execute(q)).scalars().first()
+
+    @staticmethod
+    async def messages(db, conversation_id, limit=50, before=None):
+        q = select(Message).where(Message.conversation_id == conversation_id, Message.deleted_at.is_(None))
+        if before is not None: q = q.where(Message.created_at < before)
+        rows = list((await db.execute(q.order_by(Message.created_at.desc()).limit(limit))).scalars())
+        rows.reverse()
+        return rows
+
+    @staticmethod
+    async def message(db, message_id):
+        return await db.get(Message, message_id)
+
+    @staticmethod
+    async def conversation_summary(db, conversation, membership, participant_id):
+        other = (await db.execute(select(ParticipantProfile).join(ConversationParticipant, ConversationParticipant.participant_id == ParticipantProfile.id).where(ConversationParticipant.conversation_id == conversation.id, ConversationParticipant.participant_id != participant_id))).scalars().first()
+        last = (await db.execute(select(Message).where(Message.conversation_id == conversation.id, Message.deleted_at.is_(None)).order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
+        unread_q = select(func.count()).select_from(Message).where(Message.conversation_id == conversation.id, Message.deleted_at.is_(None), Message.sender_participant_id != participant_id)
+        if membership.last_read_at is not None: unread_q = unread_q.where(Message.created_at > membership.last_read_at)
+        unread = (await db.execute(unread_q)).scalar_one()
+        return other, last, unread
+
+    @staticmethod
+    async def total_unread_messages(db, participant_id):
+        cp = aliased(ConversationParticipant)
+        q = select(func.count()).select_from(Message).join(cp, cp.conversation_id == Message.conversation_id).where(cp.participant_id == participant_id, cp.is_archived.is_(False), Message.deleted_at.is_(None), Message.sender_participant_id != participant_id, or_(cp.last_read_at.is_(None), Message.created_at > cp.last_read_at))
+        return (await db.execute(q)).scalar_one()
 
     @staticmethod
     async def meeting(db, meeting_id, lock=False):
