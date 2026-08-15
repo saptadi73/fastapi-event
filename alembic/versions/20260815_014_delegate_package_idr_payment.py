@@ -4,7 +4,6 @@ Revision ID: 202608150014
 Revises: 202608150013
 """
 from alembic import op
-import sqlalchemy as sa
 
 revision = "202608150014"
 down_revision = "202608150013"
@@ -13,8 +12,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("delegate_packages", sa.Column("payment_amount_idr", sa.Numeric(18, 2), nullable=True))
+    # Migration 010 creates this table from the current SQLAlchemy metadata.
+    # On fresh databases that metadata may already include this column, while
+    # older databases still need it added here.
+    op.execute(
+        "ALTER TABLE delegate_packages "
+        "ADD COLUMN IF NOT EXISTS payment_amount_idr NUMERIC(18, 2)"
+    )
 
 
 def downgrade() -> None:
-    op.drop_column("delegate_packages", "payment_amount_idr")
+    op.execute(
+        "ALTER TABLE delegate_packages "
+        "DROP COLUMN IF EXISTS payment_amount_idr"
+    )
