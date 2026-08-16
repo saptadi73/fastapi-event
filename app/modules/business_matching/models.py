@@ -55,6 +55,7 @@ class BusinessMatchingProfile(Base):
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
     registration_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), unique=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
     organization_name: Mapped[str | None] = mapped_column(String(255))
     country_code: Mapped[str | None] = mapped_column(String(3))
     organization_type: Mapped[str | None] = mapped_column(String(80))

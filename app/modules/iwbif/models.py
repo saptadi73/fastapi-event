@@ -39,9 +39,23 @@ class BusinessMatchingSlot(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class Company(Base):
+    __tablename__ = "companies"
+    __table_args__ = (UniqueConstraint("participant_id", name="uq_company_participant"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    country: Mapped[str] = mapped_column(String(100), nullable=False)
+    address: Mapped[str | None] = mapped_column(Text)
+    website: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class DelegateRegistrationDetail(Base):
     __tablename__ = "delegate_registration_details"
     registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), primary_key=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
     delegate_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_packages.id"), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     job_title: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -89,6 +103,38 @@ class DelegateRegistrationDetail(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class AccommodationTravel(Base):
+    __tablename__ = "accommodation_travel"
+    registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), primary_key=True)
+    room_preference: Mapped[str] = mapped_column(String(80), nullable=False)
+    preferred_roommate: Mapped[str | None] = mapped_column(String(255))
+    arrival_date: Mapped[date] = mapped_column(Date, nullable=False)
+    departure_date: Mapped[date] = mapped_column(Date, nullable=False)
+    flight_number: Mapped[str | None] = mapped_column(String(80))
+    airport: Mapped[str] = mapped_column(String(30), nullable=False)
+    need_airport_pickup: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class RegistrationParticipationCategory(Base):
+    __tablename__ = "registration_participation_categories"
+    registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), primary_key=True)
+    category: Mapped[str] = mapped_column(String(40), primary_key=True)
+
+
+class RegistrationActivity(Base):
+    __tablename__ = "registration_activities"
+    registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), primary_key=True)
+    activity_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("event_activities.id", ondelete="CASCADE"), primary_key=True)
+
+
+class BusinessMatchingProfileSlot(Base):
+    __tablename__ = "business_matching_profile_slots"
+    profile_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("business_matching_profiles.id", ondelete="CASCADE"), primary_key=True)
+    slot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("business_matching_slots.id", ondelete="CASCADE"), primary_key=True)
+
+
 class RegistrationDocument(Base):
     __tablename__ = "registration_documents"
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -104,9 +150,11 @@ class RegistrationDocument(Base):
 
 class ExhibitorRegistration(Base):
     __tablename__ = "exhibitor_registrations"
+    __table_args__ = (UniqueConstraint("event_id", "participant_id", name="uq_exhibitor_event_participant"),)
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False)
     brand: Mapped[str] = mapped_column(String(255), nullable=False)

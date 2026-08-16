@@ -188,10 +188,22 @@ PUT payload:
 ```
 
 PATCH memakai subset field yang sama. Upload foto memakai multipart field `file`.
-Response menambah `id`, `user_id`, `created_at`, `updated_at`. Simpan
-`participant.id`; ID ini dipakai registrasi, exhibitor, discovery, dan meeting.
+Response menambah `id`, `user_id`, `created_at`, `updated_at`. Frontend tidak
+perlu mengirim `participant.id` untuk registrasi atau exhibitor karena ownership
+diambil dari access token. ID participant tetap digunakan ketika memilih target
+discovery, percakapan, dan meeting.
 
 ## 5. Delegate registration
+
+`participant_id` pada payload bersifat opsional untuk kompatibilitas. Backend
+selalu mengambil participant dari access token. Jika user belum mempunyai
+participant profile, profil dibuat otomatis dari akun login dan data registrasi.
+Nilai `participant_id` yang tidak dimiliki user akan ditolak dengan HTTP 403.
+
+Identitas organisasi disimpan sekali di `companies` dan digunakan bersama oleh
+registrasi delegasi, Business Matching Profile, dan exhibitor. Pilihan aktivitas,
+kategori partisipasi, jadwal matching, serta perjalanan juga disimpan pada tabel
+relasional, bukan hanya sebagai data payload.
 
 Workflow:
 
@@ -215,7 +227,7 @@ PATCH /api/v1/events/{event_id}/registrations/{registration_id}
 
 ```json
 {
-  "participant_id":"uuid","delegate_package_id":"uuid","full_name":"Delegate Name",
+  "delegate_package_id":"uuid","full_name":"Delegate Name",
   "job_title":"Director","company_organization":"Example Company",
   "nationality":"Indonesian","title":"Ms.","business_sector":"Technology",
   "country":"Indonesia","email":"delegate@example.com","mobile_whatsapp":"+628123456789",
@@ -236,7 +248,8 @@ PATCH /api/v1/events/{event_id}/registrations/{registration_id}
 ```
 
 Pilihan harus berasal dari master. Departure tidak boleh sebelum arrival dan
-seluruh consent wajib `true`.
+seluruh consent wajib `true`. Jangan mengambil atau menyisipkan `participant_id`
+dari local storage ke payload ini.
 
 Response:
 
@@ -284,7 +297,7 @@ Payload create/update — **Auth**:
 
 ```json
 {
-  "participant_id":"uuid","company_name":"Example SME","country":"Indonesia",
+  "company_name":"Example SME","country":"Indonesia",
   "brand":"Example Brand","contact_person":"Contact Name","email":"contact@example.com",
   "phone":"+628123456789","products_to_display":"Food products",
   "booth_size_requested":"Standard Booth 3x3","electricity_requirement":"220V, 500W",
@@ -304,7 +317,8 @@ POST   /api/v1/exhibitors/{exhibitor_id}/product-catalogue
 
 Create menghasilkan draft. Upload catalogue (`file`, max 10 MB) mengubah status
 menjadi submitted. List event hanya menampilkan submitted. Update/delete hanya
-draft milik user.
+draft milik user. Satu akun hanya dapat membuat satu exhibitor per event;
+ownership selalu berasal dari access token.
 
 ## 8. Business Matching profile dan discovery
 

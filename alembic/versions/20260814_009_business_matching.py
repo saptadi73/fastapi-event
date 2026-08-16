@@ -10,6 +10,7 @@ from app.modules.business_matching.models import (
     MatchingSession, Meeting, MeetingResource, MeetingSlot, MeetingSlotProposal,
     MeetingVenue, Message, Notification, ParticipantBlock, ParticipantReport,
 )
+from app.modules.iwbif.models import Company
 
 revision = "202608140009"
 down_revision = "202608010008"
@@ -17,7 +18,7 @@ branch_labels = None
 depends_on = None
 
 TABLES = [
-    BusinessMatchingProfile.__table__, ParticipantBlock.__table__, ParticipantReport.__table__, Conversation.__table__,
+    Company.__table__, BusinessMatchingProfile.__table__, ParticipantBlock.__table__, ParticipantReport.__table__, Conversation.__table__,
     ConversationParticipant.__table__, MatchingSession.__table__, MeetingSlot.__table__,
     MeetingVenue.__table__, MeetingResource.__table__, Meeting.__table__, Message.__table__,
     MeetingSlotProposal.__table__, Notification.__table__, AuditLog.__table__,

@@ -25,3 +25,4 @@ Dokumen acuan:
 - `docs/IWBIF_2026_Backend_Implementation_Reference.md`
 - `docs/Backend_Business_Matching_FastAPI_v2.md`
 - `docs/FRONTEND_DOKU_PAYMENT_INTEGRATION.md`
+- `docs/FRONTEND_IWBIF_REGISTRATION_FLOW.md`

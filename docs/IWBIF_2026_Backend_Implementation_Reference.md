@@ -489,6 +489,12 @@ exhibition_terms_accepted_at
 
 # 7. Recommended Relational Model
 
+> Implementation status (16 August 2026): model inti di bawah telah
+> diimplementasikan. `companies`, `registration_participation_categories`,
+> `registration_activities`, `accommodation_travel`, dan
+> `business_matching_profile_slots` sudah berupa tabel relasional. Field JSON
+> lama tetap dipertahankan sementara untuk kompatibilitas API dan data lama.
+
 ```text
 events
 ├── delegate_packages
@@ -509,6 +515,22 @@ events
 ```
 
 Recommended additional master: `companies`, sehingga delegate, business matching profile, dan exhibitor dapat mengacu ke organisasi yang sama.
+
+Implementasi menggunakan satu company canonical per participant. Alur ownership:
+
+```text
+authenticated user -> participant -> company
+                              |-> registration -> delegate detail
+                              |                -> accommodation/travel
+                              |                -> activities/categories/documents
+                              |                -> business matching profile/slots
+                              |-> exhibitor registration -> product catalogue
+```
+
+Frontend tidak menentukan ownership. `participant_id` pada payload registrasi
+dan exhibitor bersifat opsional hanya untuk backward compatibility. Backend
+selalu menyelesaikan participant dari access token, membuat participant profile
+otomatis jika belum ada, dan menolak ID milik user lain.
 
 # 8. Recommended API Endpoints
 
@@ -551,7 +573,7 @@ PATCH /api/v1/registrations/{registration_id}/business-matching-profile
 ```http
 POST  /api/v1/events/{event_id}/exhibitors
 GET   /api/v1/events/{event_id}/exhibitors/{exhibitor_id}
-PATCH /api/v1/events/{event_id}/exhibitors/{exhibitor_id}
+PUT   /api/v1/events/{event_id}/exhibitors/{exhibitor_id}
 ```
 
 ## Master Data
@@ -584,6 +606,10 @@ GET /api/v1/master/countries
 ## Source Requirement vs Backend Recommendation
 
 Dokumen ini mempertahankan field, required status, dan option yang terdapat pada form sumber. Bagian seperti normalized relational tables, UUID, status lifecycle, dedicated upload endpoint, master package, dan dynamic meeting slots merupakan rekomendasi arsitektur backend agar portal dapat digunakan ulang dan dipelihara dengan baik.
+
+Rekomendasi normalisasi tersebut kini aktif melalui migrasi
+`202608160016`, sedangkan batas satu exhibitor per user/event aktif melalui
+`202608160017`.
 
 ## Business Matching Integration
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -18,7 +18,7 @@ class ParticipantProfile(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(nullable=False, unique=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
     full_name: Mapped[str] = mapped_column(String(255))
     organization_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     biography: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -14,7 +14,9 @@ from app.modules.users.models import User
 from app.support.responses import success_response
 from . import schemas
 from .constants import *
-from .models import BusinessMatchingSlot, DelegatePackage, DelegateRegistrationDetail, EventActivity, ExhibitorRegistration, RegistrationDocument
+from .models import (BusinessMatchingProfileSlot, BusinessMatchingSlot, Company,
+    DelegatePackage, DelegateRegistrationDetail, EventActivity,
+    ExhibitorRegistration, RegistrationDocument)
 from .service import IwbifService
 
 router = APIRouter()
@@ -150,8 +152,10 @@ async def update_exhibitor(event_id: UUID, exhibitor_id: UUID, payload: schemas.
     row = await db.get(ExhibitorRegistration, exhibitor_id, with_for_update=True); participant = await db.get(ParticipantProfile, row.participant_id) if row else None
     if not row or row.event_id != event_id or not participant or participant.user_id != user.id: raise NotFoundException("EXHIBITOR_NOT_FOUND", "Exhibitor tidak ditemukan")
     if row.status != "draft": raise ConflictException("EXHIBITOR_NOT_EDITABLE", "Hanya draft exhibitor yang dapat diubah")
-    if payload.participant_id != row.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
+    if payload.participant_id and payload.participant_id != row.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
     data = payload.model_dump(exclude={"participant_id"}); data["email"] = str(data["email"])
+    company = await IwbifService.upsert_company(db, row.participant_id, name=payload.company_name, country=payload.country)
+    row.company_id = company.id
     for key, value in data.items(): setattr(row, key, value)
     row.exhibition_terms_accepted_at = datetime.now(timezone.utc); await db.commit(); await db.refresh(row); return success_response("Exhibitor berhasil diperbarui", schemas.ExhibitorRead.model_validate(row), request=request)
 
@@ -175,9 +179,14 @@ async def matching_profile(registration_id: UUID, payload: schemas.MatchingProfi
     if slots != set(payload.preferred_slot_ids): raise ValidationException("INVALID_MATCHING_SLOT", "Slot business matching tidak valid")
     row = (await db.execute(select(BusinessMatchingProfile).where(BusinessMatchingProfile.registration_id == reg.id))).scalar_one_or_none()
     if not row: row = BusinessMatchingProfile(event_id=reg.event_id, participant_id=reg.participant_id, registration_id=reg.id); db.add(row)
-    data = payload.model_dump(); row.organization_name = data.pop("company_name"); row.contact_email = str(data.pop("email")); row.business_needs = data.pop("looking_for"); row.preferred_regions = data.pop("preferred_countries"); row.preferred_slot_ids = [str(x) for x in data.pop("preferred_slot_ids")]
+    company = await IwbifService.upsert_company(db, reg.participant_id, name=payload.company_name, country=payload.country)
+    country_codes = {"Indonesia": "IDN", "Malaysia": "MYS", "China": "CHN", "Singapore": "SGP", "Thailand": "THA", "Vietnam": "VNM", "Cambodia": "KHM", "Philippines": "PHL", "Others": "OTH"}
+    data = payload.model_dump(); row.organization_name = data.pop("company_name"); row.country_code = country_codes.get(data.pop("country"), "OTH"); row.contact_email = str(data.pop("email")); row.contact_phone = data.pop("phone"); row.business_needs = data.pop("looking_for"); row.preferred_regions = data.pop("preferred_countries"); selected_slot_ids = data.pop("preferred_slot_ids"); row.preferred_slot_ids = [str(x) for x in selected_slot_ids]; row.company_id = company.id
     for key, value in data.items(): setattr(row, key, value)
-    row.available_for_matching = True; row.profile_sharing_consent_at = datetime.now(timezone.utc); await db.commit(); await db.refresh(row)
+    row.available_for_matching = True; row.profile_sharing_consent_at = datetime.now(timezone.utc); await db.flush()
+    await db.execute(BusinessMatchingProfileSlot.__table__.delete().where(BusinessMatchingProfileSlot.profile_id == row.id))
+    db.add_all(BusinessMatchingProfileSlot(profile_id=row.id, slot_id=slot_id) for slot_id in selected_slot_ids)
+    await db.commit(); await db.refresh(row)
     return success_response("Business matching profile berhasil disimpan", {"id": row.id, "registration_id": row.registration_id}, request=request)
 
 @router.get("/registrations/{registration_id}/business-matching-profile")

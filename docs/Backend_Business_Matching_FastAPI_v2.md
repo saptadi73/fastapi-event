@@ -62,6 +62,18 @@ app/modules/
 
 ## 4. Business Matching Profile
 
+### Ownership dan identitas organisasi
+
+Current user ditentukan oleh access token. Backend mencari participant melalui
+`participants.user_id`; frontend tidak boleh mengirim participant ID untuk
+mengubah identitas pemilik profile. Untuk profile IWBIF, registrasi terkait wajib
+berstatus `confirmed`.
+
+Data organisasi canonical disimpan di `companies` dan direferensikan oleh
+delegate registration, business matching profile, serta exhibitor. Nama dan
+kontak yang ikut tersimpan pada profile merupakan snapshot/presentation data,
+bukan identitas organisasi baru.
+
 Table `business_matching_profiles`:
 
   Field                    Type           Keterangan
@@ -69,6 +81,8 @@ Table `business_matching_profiles`:
   id                       UUID           PK
   event_id                 UUID           FK event
   participant_id           UUID           FK participant
+  registration_id          UUID           FK registration, unique
+  company_id               UUID           FK company
   organization_name        varchar        Organisasi
   country_code             varchar        Negara
   organization_type        varchar/enum   Tipe organisasi
@@ -86,6 +100,9 @@ Table `business_matching_profiles`:
 Gunakan master/tag relational table untuk `business_interests`,
 `business_sectors`, `technology_interests`, `partnership_types`,
 `business_offerings`, dan `business_needs`.
+
+Pilihan jadwal IWBIF tersimpan pada `business_matching_profile_slots`; backend
+memvalidasi bahwa setiap slot aktif dan berasal dari event registrasi yang sama.
 
 ## 5. Participant Discovery
 

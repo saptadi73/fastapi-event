@@ -5,7 +5,9 @@ from .constants import *
 
 
 class DelegateRegistrationWrite(BaseModel):
-    participant_id: UUID
+    # Optional for backward compatibility. The backend always resolves the
+    # participant from the authenticated user and rejects a mismatched ID.
+    participant_id: UUID | None = None
     delegate_package_id: UUID
     full_name: str = Field(min_length=2, max_length=255)
     job_title: str = Field(min_length=1, max_length=160)
@@ -56,6 +58,8 @@ class DelegateRegistrationWrite(BaseModel):
             if value not in choices: raise ValueError(f"Invalid {name}")
         for values, choices, name in [(self.participation_categories, PARTICIPATION_CATEGORIES, "participation_categories"), (self.looking_for, LOOKING_FOR, "looking_for"), (self.preferred_countries, PREFERRED_COUNTRIES, "preferred_countries")]:
             if not set(values).issubset(choices): raise ValueError(f"Invalid {name}")
+            if len(values) != len(set(values)): raise ValueError(f"Duplicate {name}")
+        if len(self.activity_ids) != len(set(self.activity_ids)): raise ValueError("Duplicate activity_ids")
         if self.departure_date < self.arrival_date: raise ValueError("departure_date must be on or after arrival_date")
         if not all((self.information_accuracy_confirmed, self.terms_accepted, self.business_matching_data_consent)): raise ValueError("All declarations and consents must be accepted")
         return self
@@ -107,7 +111,7 @@ class SlotWrite(BaseModel):
         return self
 
 class ExhibitorWrite(BaseModel):
-    participant_id: UUID
+    participant_id: UUID | None = None
     company_name: str = Field(min_length=1); country: str; brand: str = Field(min_length=1); contact_person: str = Field(min_length=1)
     email: str; phone: str = Field(min_length=5); products_to_display: str = Field(min_length=1)
     booth_size_requested: str; electricity_requirement: str = Field(min_length=1); special_requirement: str = Field(min_length=1)
@@ -134,5 +138,6 @@ class MatchingProfileWrite(BaseModel):
     def validate_values(self):
         if "@" not in self.email or self.email.startswith("@") or self.email.endswith("@"): raise ValueError("Invalid email")
         if not set(self.looking_for).issubset(LOOKING_FOR) or not set(self.preferred_countries).issubset(PREFERRED_COUNTRIES): raise ValueError("Invalid matching selection")
+        if len(self.looking_for) != len(set(self.looking_for)) or len(self.preferred_countries) != len(set(self.preferred_countries)) or len(self.preferred_slot_ids) != len(set(self.preferred_slot_ids)): raise ValueError("Duplicate matching selection")
         if not self.profile_sharing_consent: raise ValueError("Profile sharing consent must be accepted")
         return self
