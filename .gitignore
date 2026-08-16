@@ -4,6 +4,11 @@ __pycache__/
 .pytest_cache/
 *.log
 .env
-uploads/
+uploads/*
+!uploads/speakers/
+uploads/speakers/*
+!uploads/speakers/arifah-choiri-fauzi.jpg
+!uploads/speakers/linda-chen.jpg
+!uploads/speakers/ratna-kusuma.jpg
 .private_uploads/
 .secrets/

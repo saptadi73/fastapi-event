@@ -14,6 +14,7 @@ class SpeakerBase(BaseModel):
     linkedin_url: str | None = None
     website_url: str | None = None
     expertise_tags: list[str] | None = None
+    session_title: str | None = None
     is_featured: bool = False
     status: str = "draft"
 
@@ -28,6 +29,7 @@ class SpeakerUpdate(BaseModel):
     organization_name: str | None = None
     biography: str | None = None
     profile_photo_url: str | None = None
+    session_title: str | None = None
     status: str | None = None
     is_featured: bool | None = None
 

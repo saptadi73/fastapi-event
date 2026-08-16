@@ -95,13 +95,44 @@ async def seed():
             if idx <= 2: await ensure(db, CheckIn, ticket_id=ticket.id, event_id=event.id, defaults=dict(session_id=None, check_in_type="qr", check_in_at=at(16, 7, 30 + idx), check_in_by=admin.id, gate_name="Kempinski Main Lobby", device_id="IWBIF-SEED-01", status="success", notes="Delegate arrival check-in"))
             users.append(user); participants.append(participant); registrations.append(reg); profiles.append(bm)
 
+        # Nine featured profiles represent every speaker category described in
+        # docs/IWAPI_SUMMIT_WEBSITE.md. Names other than the minister are demo data.
         speakers = [
-            ("H.E. Minister of Women Empowerment", "Minister", "Government of Indonesia", "IDN", ["Women Empowerment", "Public Policy"]),
-            ("Dr. Ratna Kusuma", "Chairwoman", "IWAPI", "IDN", ["Women Entrepreneurship", "Global Trade"]),
-            ("Linda Chen", "Regional Investment Director", "Asia Growth Fund", "SGP", ["Investment", "Access to Finance"]),
+            ("Arifah Choiri Fauzi", "Minister of Women Empowerment", "Government of Indonesia", "IDN", ["Women Empowerment", "Public Policy"], "Keynote: Strengthening Women Entrepreneurship", "/uploads/speakers/arifah-choiri-fauzi.jpg"),
+            ("Dr. Ratna Kusuma", "Chairwoman", "IWAPI", "IDN", ["Women Entrepreneurship", "Global Trade", "Business Associations"], "Opening Remarks: Women-Led Business Networks", "/uploads/speakers/ratna-kusuma.jpg"),
+            ("Linda Chen", "Regional Investment Director", "Asia Growth Fund", "SGP", ["Investment", "Access to Finance"], "Panel: Access to Finance and Investment", "/uploads/speakers/linda-chen.jpg"),
+            ("Maya Santoso", "Women Business Leader", "Nusantara Women Enterprise", "IDN", ["Women Business Leadership", "MSME Growth"], "Panel: Scaling Women-Led Enterprises", None),
+            ("Sofia Martinez", "International Entrepreneur", "Global Women Trade Network", "ESP", ["International Entrepreneurship", "Market Expansion"], "Panel: Cross-Border Market Expansion", None),
+            ("Amina Okafor", "Impact Investor", "Women Growth Capital", "NGA", ["Impact Investment", "Investment Readiness"], "Strategic Discussion: Investment Readiness", None),
+            ("Priya Nair", "Director of SME Banking", "Regional Development Bank", "IND", ["Financial Inclusion", "SME Banking"], "Panel: Inclusive Finance for Women-Owned MSMEs", None),
+            ("Dr. Elena Petrova", "Digital Commerce Expert", "Digital Commerce Institute", "BGR", ["Digital Transformation", "E-Commerce"], "Panel: Digital Transformation and Global Reach", None),
+            ("Grace Wong", "International Business Mentor", "Asia-Pacific Mentors Network", "MYS", ["International Mentoring", "Strategic Partnerships"], "Mentoring Session: Building Strategic Partnerships", None),
         ]
-        for name, title, org, country, expertise in speakers:
-            await ensure(db, Speaker, full_name=name, defaults=dict(professional_title=title, organization_name=org, country_code=country, biography=f"{name} brings strategic perspectives to IWBIF 2026.", profile_photo_url=f"https://ui-avatars.com/api/?name={name.replace(' ', '+')}", linkedin_url="https://www.linkedin.com/", website_url="https://iwbif2026.org", expertise_tags=expertise, is_featured=True, status="published"))
+        for name, title, org, country, expertise, session_title, photo_url in speakers:
+            # Rename the original generic minister record in existing seeded databases.
+            speaker = await one(db, Speaker, full_name=name)
+            if speaker is None and name == "Arifah Choiri Fauzi":
+                speaker = await one(db, Speaker, full_name="H.E. Minister of Women Empowerment")
+                if speaker is not None:
+                    speaker.full_name = name
+            defaults = dict(
+                professional_title=title,
+                organization_name=org,
+                country_code=country,
+                biography=f"{name} brings strategic perspectives to IWBIF 2026.",
+                profile_photo_url=photo_url or f"https://ui-avatars.com/api/?name={name.replace(' ', '+')}",
+                linkedin_url="https://www.linkedin.com/",
+                website_url="https://iwbif2026.org",
+                expertise_tags=expertise,
+                session_title=session_title,
+                is_featured=True,
+                status="published",
+            )
+            if speaker is None:
+                db.add(Speaker(full_name=name, **defaults))
+            else:
+                for key, value in defaults.items():
+                    setattr(speaker, key, value)
 
         program = [
             ("opening-ceremony", "Opening Ceremony", "ceremony", 16, 8, 30, 60),

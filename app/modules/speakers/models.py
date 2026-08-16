@@ -21,5 +21,6 @@ class Speaker(Base):
     linkedin_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     expertise_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    session_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(30), default="draft")
