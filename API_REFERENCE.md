@@ -562,6 +562,40 @@ Setelah Checkout, DOKU dapat mengarahkan browser ke
 pernah mengubah status pembayaran; frontend tetap membaca order/invoice setelah
 notification terverifikasi oleh backend.
 
+### Laporan pembayaran dan pendapatan organizer
+
+Kedua endpoint berikut memerlukan Bearer token dengan role `admin` atau
+`organizer`:
+
+```http
+GET /api/v1/admin/reports/payments
+GET /api/v1/admin/reports/payments.csv
+Authorization: Bearer <admin_access_token>
+```
+
+Query parameter opsional untuk kedua endpoint:
+
+- `event_id`: UUID event.
+- `date_from`, `date_to`: datetime ISO 8601. Filter memakai `paid_at`, atau
+  `created_at` ketika transaksi belum dibayar.
+- `status`: `created`, `pending`, `success`, `failed`, atau `expired`.
+- `channel_code`: contoh `BCA`, `BNI`, `BRI`, atau `MANDIRI`.
+- `package_id`: UUID delegate package/tiket.
+- Khusus JSON: `limit` 1–500 dan `offset` untuk daftar transaksi.
+
+Response JSON memberikan `summary`, agregasi `by_status`, `by_channel`,
+`by_package`, `daily_revenue`, dan daftar `transactions`. Contoh summary:
+
+```json
+{"total_transactions":12,"successful_transactions":8,"pending_transactions":2,"failed_transactions":1,"expired_transactions":1,"gross_revenue":64000000,"pending_amount":16000000,"currency":"IDR"}
+```
+
+`gross_revenue`, `tickets_sold`, dan `daily_revenue` hanya menghitung payment
+berstatus `success`. Browser return tidak pernah dihitung sebagai keberhasilan;
+sumber final tetap notification DOKU yang telah diverifikasi. CSV berisi detail
+payment, order, registrasi, event, peserta, paket, channel, reference DOKU,
+nominal, dan waktu pembayaran sesuai filter yang sama.
+
 ## 13. Tickets dan check-in
 
 ```http

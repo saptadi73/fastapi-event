@@ -1,16 +1,18 @@
 import logging
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_db_session
+from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.modules.users.models import User
 from app.support.responses import success_response
 from app.modules.payments import schemas
 from app.modules.payments.service import PaymentService
 from app.modules.payments.doku_snap import DokuSnapClient
-from app.core.exceptions import AppException
+from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
+from app.core.exceptions import AppException, ValidationException
 
 router = APIRouter(tags=["payments"])
 logger = logging.getLogger(__name__)
@@ -123,6 +125,75 @@ async def get_my_invoices(
         "Daftar invoice peserta ditemukan",
         data=invoices,
         request=request,
+    )
+
+
+async def _payment_report_rows(
+    db: AsyncSession,
+    event_id: uuid.UUID | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    status: str | None,
+    channel_code: str | None,
+    package_id: uuid.UUID | None,
+):
+    if date_from and date_to and date_from > date_to:
+        raise ValidationException("INVALID_REPORT_PERIOD", "date_from tidak boleh sesudah date_to")
+    normalized_status = status.strip().lower() if status else None
+    if normalized_status and normalized_status not in PAYMENT_STATUSES:
+        raise ValidationException("INVALID_PAYMENT_STATUS", "Status pembayaran tidak valid")
+    return await PaymentReportingService.rows(
+        db,
+        event_id=event_id,
+        date_from=date_from,
+        date_to=date_to,
+        status=normalized_status,
+        channel_code=channel_code,
+        package_id=package_id,
+    )
+
+
+@router.get("/admin/reports/payments", summary="DOKU payment and revenue report")
+async def admin_payment_report(
+    request: Request,
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id)
+    data = PaymentReportingService.build_report(rows, limit=limit, offset=offset)
+    return success_response(
+        "Laporan pembayaran DOKU berhasil diambil",
+        data=data,
+        meta={"total": len(rows), "limit": limit, "offset": offset},
+        request=request,
+    )
+
+
+@router.get("/admin/reports/payments.csv", summary="Export DOKU payment report as CSV")
+async def admin_payment_report_csv(
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id)
+    filename = f"iwbif-doku-payments-{datetime.now().date().isoformat()}.csv"
+    return Response(
+        content=PaymentReportingService.csv(rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
