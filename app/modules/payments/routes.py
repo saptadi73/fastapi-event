@@ -52,6 +52,16 @@ async def create_doku_checkout(
     )
 
 
+@router.get("/payments/doku/return", summary="DOKU browser return landing")
+async def doku_browser_return(request: Request):
+    """Browser landing only; notification remains the payment source of truth."""
+    return success_response(
+        "Kembali dari DOKU. Periksa status pembayaran melalui order atau invoice.",
+        data={"payment_status_source": "doku_notification"},
+        request=request,
+    )
+
+
 @router.get("/payments/{payment_id}", summary="Get payment")
 async def get_payment(
     request: Request,

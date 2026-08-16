@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     PROFILE_PHOTO_MAX_SIZE_BYTES: int = 5 * 1024 * 1024
 
     PROJECT_TIMEZONE: str = "Asia/Jakarta"
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
 
     DOKU_CLIENT_ID: str = ""
     DOKU_SECRET_KEY: str = ""
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     DOKU_CHECKOUT_PATH: str = "/checkout/v1/payment"
     DOKU_PAYMENT_DUE_MINUTES: int = 60
     DOKU_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku"
+    DOKU_NOTIFICATION_BASE_URL: str = ""
     DOKU_CALLBACK_URL: str = "http://localhost:3000/payment/result"
 
     # DOKU Direct API (BI-SNAP). Keys are file paths; never commit private keys.

@@ -165,6 +165,8 @@ class DokuSnapClient:
             raise ValidationException("DOKU_VA_CHANNEL_NOT_CONFIGURED", f"VA {bank_code.upper()} belum dikonfigurasi")
         path = config.get("create_path", self.settings.DOKU_SNAP_VA_CREATE_PATH)
         payload["partnerServiceId"] = config["partner_service_id"]
+        if "customer_no" in config:
+            payload["customerNo"] = str(config["customer_no"])
         token = await self.access_token()
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         external_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(10**8):08d}"

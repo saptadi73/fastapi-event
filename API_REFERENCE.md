@@ -557,6 +557,10 @@ POST /api/v1/webhooks/doku
 
 Endpoint itu memakai acknowledgment/signature DOKU, bukan envelope biasa.
 `POST /api/v1/payments/doku/checkout` adalah fallback lama; flow utama Direct VA.
+Setelah Checkout, DOKU dapat mengarahkan browser ke
+`GET /api/v1/payments/doku/return`. Endpoint ini hanya landing page dan tidak
+pernah mengubah status pembayaran; frontend tetap membaca order/invoice setelah
+notification terverifikasi oleh backend.
 
 ## 13. Tickets dan check-in
 

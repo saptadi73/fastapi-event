@@ -1,54 +1,81 @@
-# DOKU SNAP Sandbox Setup — IWBIF 2026
+# DOKU Sandbox Setup — IWBIF 2026
 
-## Endpoint publik
+## URL publik yang didaftarkan
 
-- Token URL pada **Integration → API Keys**:
-  `https://<backend-domain>/api/v1/doku/snap/authorization/v1/access-token/b2b`
-- Notification URL pada setiap **Virtual Account SNAP → Configure**:
-  `https://<backend-domain>/api/v1/webhooks/doku/snap/va/payment`
+- Base URL backend: `https://api-event.gagakrimang.web.id`
+- SNAP Token URL pada **Integration → API Keys**:
+  `https://api-event.gagakrimang.web.id/api/v1/doku/snap/authorization/v1/access-token/b2b`
+- SNAP Payment Notification URL pada setiap **Virtual Account SNAP → Configure**:
+  `https://api-event.gagakrimang.web.id/api/v1/webhooks/doku/snap/va/payment`
+- Checkout/Non-SNAP Notification URL:
+  `https://api-event.gagakrimang.web.id/api/v1/webhooks/doku`
+- Checkout browser return URL:
+  `https://api-event.gagakrimang.web.id/api/v1/payments/doku/return`
 
-Endpoint callback tidak memakai JWT user. Keamanan menggunakan RSA token request,
+Jangan memakai URL notification Non-SNAP sebagai Additional Notification URL
+untuk produk SNAP. SNAP dan Non-SNAP mempunyai format header, signature, dan ACK
+berbeda. Semua layanan Virtual Account SNAP create-VA/MGPC dapat memakai SNAP
+Payment Notification URL yang sama.
+
+Inquiry URL hanya diperlukan untuk produk DIPC, ketika DOKU harus menanyakan
+tagihan ke merchant saat nasabah mulai membayar. Backend ini saat ini memakai
+create-VA/MGPC dan belum menyediakan inquiry DIPC.
+
+Endpoint DOKU tidak memakai JWT user. Keamanannya menggunakan RSA untuk token,
 Bearer token merchant, HMAC-SHA512, validasi timestamp dan nominal, serta
 idempotensi `X-EXTERNAL-ID`.
 
-## API keys dan RSA
+## API key dan RSA
 
-Jalankan sekali:
+Jalankan sekali bila belum mempunyai pasangan key:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\generate_doku_snap_keys.py
 ```
 
-Unggah `.secrets/doku-snap-public.pem` ke DOKU. Jangan mengunggah atau membagikan
-`.secrets/doku-snap-private.pem`.
+Unggah public key pasangan tersebut sebagai **Merchant Public Key** di DOKU.
+Jangan pernah mengunggah atau membagikan private key.
+
+`DOKU_SNAP_PRIVATE_KEY_PATH` wajib menunjuk private key yang cocok dengan
+Merchant Public Key. `DOKU_SNAP_DOKU_PUBLIC_KEY_PATH` berbeda: file itu harus
+berisi public key milik DOKU untuk memverifikasi token request dari DOKU.
 
 ## Environment backend
 
 ```env
+PUBLIC_BASE_URL=https://api-event.gagakrimang.web.id
 DOKU_BASE_URL=https://api-sandbox.doku.com
-DOKU_SNAP_PARTNER_ID=<Client ID merchant dari DOKU>
-DOKU_SNAP_CLIENT_SECRET=<Secret Key dari DOKU>
+DOKU_CLIENT_ID=<Client ID merchant>
+DOKU_SECRET_KEY=<Secret Key merchant>
+DOKU_NOTIFICATION_BASE_URL=https://api-event.gagakrimang.web.id
+DOKU_NOTIFICATION_PATH=/api/v1/webhooks/doku
+DOKU_CALLBACK_URL=https://api-event.gagakrimang.web.id/api/v1/payments/doku/return
+
+DOKU_SNAP_PARTNER_ID=<Client ID merchant>
+DOKU_SNAP_CLIENT_SECRET=<Secret Key merchant>
 DOKU_SNAP_PRIVATE_KEY_PATH=.secrets/doku-snap-private.pem
 DOKU_SNAP_DOKU_PUBLIC_KEY_PATH=.secrets/doku-snap-doku-public.pem
 DOKU_SNAP_DOKU_CLIENT_ID=<X-CLIENT-KEY/X-PARTNER-ID milik DOKU untuk callback>
-DOKU_SNAP_VA_CHANNELS_JSON={"BCA":{"partner_service_id":"<BIN BCA>"},"BNI":{"partner_service_id":"<BIN BNI>"},"BNC":{"partner_service_id":"<BIN BNC>"}}
+DOKU_SNAP_VA_CHANNELS_JSON={"MANDIRI":{"partner_service_id":"   86188","customer_no":"0"},"BCA":{"partner_service_id":"   19008","customer_no":"9"},"BNI":{"partner_service_id":"    8492","customer_no":"3"},"BRI":{"partner_service_id":"   13925","customer_no":"6"}}
 ```
 
-Public key dan Client ID callback DOKU diperoleh dari DOKU/onboarding. Nilai
-`partner_service_id` adalah BIN per channel dan harus disimpan sebagai string.
+Nilai `partner_service_id` berasal dari kolom Partner Service ID dan dipenuhi
+spasi di kiri hingga delapan karakter sesuai SNAP. `customer_no` berasal dari
+kolom Prefix Customer. Merchant BIN adalah informasi gabungan dan tidak dipakai
+sebagai pengganti Partner Service ID.
+API key lain yang tidak disebut oleh spesifikasi Checkout/SNAP tidak dikirim
+sebagai header pembayaran sampai fungsi dan nama header-nya dikonfirmasi DOKU.
 
-## Harga IDR
+## Urutan smoke test sandbox
 
-Set `payment_amount_idr` melalui CRUD admin delegate package. `currency` dan
-`amount` tetap menjadi harga display; charge DOKU memakai nilai IDR tersebut.
-
-## Urutan uji sandbox
-
-1. Pastikan migrasi `202608150014` aktif.
-2. Upload public key merchant dan daftarkan Token URL.
-3. Configure BIN serta Notification URL setiap bank.
-4. Set `payment_amount_idr` paket.
-5. Login peserta dan panggil `POST /api/v1/payments/doku/direct/va`.
-6. Tampilkan `virtual_account_no` dan `instructions_url` di frontend.
+1. Pastikan migrasi database berada pada head.
+2. Deploy backend dan pastikan OpenAPI memuat keempat endpoint publik di atas.
+3. Unggah Merchant Public Key yang cocok dengan private key deployment.
+4. Isi DOKU public key, DOKU callback Client ID, dan BIN tiap bank.
+5. Daftarkan Token URL dan Notification URL pada dashboard DOKU.
+6. Login peserta dan panggil `POST /api/v1/payments/doku/direct/va`.
 7. Simulasikan pembayaran melalui DOKU sandbox.
-8. Pastikan payment menjadi `success` dan order/registration menjadi `paid`.
+8. Pastikan payment, order, dan registration berubah menjadi `success`/`paid`.
+
+Browser return bukan bukti pembayaran. Frontend harus membaca status backend;
+status `paid` hanya berasal dari notification DOKU yang lolos verifikasi.
