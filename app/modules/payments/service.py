@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments import schemas
-from app.modules.payments.models import Order, OrderStatus, PaymentStatus, PaymentWebhookEvent
+from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, PaymentStatus, PaymentWebhookEvent
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
@@ -21,6 +21,130 @@ from app.modules.registrations.models import Registration, RegistrationStatus
 
 
 class PaymentService:
+    @staticmethod
+    async def create_doku_qris(session: AsyncSession, payload: schemas.CreateDokuQrisRequest, user_id: uuid.UUID) -> schemas.DokuQrisResponse:
+        registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+        registration = next((row for row in registrations if row.id == payload.registration_id), None)
+        if not registration:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan untuk akun ini")
+        order = await PaymentRepository.get_latest_order(session, registration.id)
+        if order and order.status == OrderStatus.PAID:
+            raise ConflictException("ORDER_ALREADY_PAID", "Registrasi ini sudah dibayar")
+        if not order or order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+            order = await PaymentRepository.create_order(session, registration.id)
+        if order.currency.upper() != "IDR":
+            raise ValidationException("DOKU_IDR_REQUIRED", "QRIS hanya menerima tagihan IDR")
+        payment = await PaymentRepository.get_payment_by_order(session, order.id)
+        if payment and payment.provider not in {"doku", "doku_snap_qris"}:
+            raise ConflictException("LEGACY_PAYMENT_PENDING", "Batalkan transaksi gateway lama terlebih dahulu")
+        reference = f"QR{uuid.uuid4().hex[:20].upper()}"
+        body = {"partnerReferenceNo": reference, "amount": {"value": str(order.total_amount), "currency": "IDR"}, "additionalInfo": {"feeType": "1"}}
+        if order.expires_at:
+            body["validityPeriod"] = order.expires_at.astimezone().isoformat(timespec="seconds")
+        response, external_id = await DokuSnapClient().create_qris(body)
+        qr_content = str(response.get("qrContent") or "")
+        if not qr_content:
+            raise ValidationException("DOKU_QRIS_CONTENT_MISSING", "DOKU tidak mengembalikan konten QRIS")
+        from app.modules.payments.models import Payment
+        if not payment:
+            payment = Payment(order_id=order.id, provider="doku_snap_qris", gross_amount=order.total_amount, currency=order.currency)
+            session.add(payment)
+        payment.provider, payment.provider_order_id, payment.payment_type, payment.channel_code = "doku_snap_qris", reference, "doku_snap_qris", "QRIS"
+        payment.external_id, payment.provider_reference_no, payment.payment_instructions_url = external_id, response.get("referenceNo"), qr_content
+        payment.raw_response, payment.transaction_status = json.dumps(response), PaymentStatus.PENDING
+        await session.commit()
+        await session.refresh(payment)
+        return schemas.DokuQrisResponse(payment_id=payment.id, order_id=order.id, order_number=order.order_number, status=payment.transaction_status, qr_content=qr_content, amount=float(order.total_amount), currency=order.currency, expires_at=order.expires_at)
+
+    @staticmethod
+    async def create_doku_direct_debit_binding(session: AsyncSession, payload: schemas.CreateDirectDebitBindingRequest, user_id: uuid.UUID) -> schemas.DirectDebitBindingResponse:
+        registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+        registration = next((row for row in registrations if row.id == payload.registration_id), None)
+        if not registration:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan untuk akun ini")
+        channel_code = payload.channel_code.strip().upper()
+        client = DokuSnapClient()
+        channel = client.direct_debit_channels().get(channel_code)
+        if not channel:
+            raise ValidationException("DOKU_DIRECT_DEBIT_CHANNEL_NOT_CONFIGURED", f"Direct Debit {channel_code} belum dikonfigurasi")
+        customer_reference = f"B{uuid.uuid4().hex[:11].upper()}"
+        body: dict[str, Any] = {
+            "partnerReferenceNo": customer_reference,
+            "phoneNo": payload.phone_no,
+            "additionalInfo": {
+                "channel": channel.get("channel") or f"DIRECT_DEBIT_{channel_code}_SNAP",
+                "custIdMerchant": str(registration.participant_id),
+            },
+        }
+        if payload.device_id:
+            body["deviceId"] = payload.device_id
+        response, _external_id = await client.direct_debit_request(channel_code, "/direct-debit/core/v1/registration-account-binding", body)
+        additional = response.get("additionalInfo") or {}
+        token = additional.get("bankCardToken") or additional.get("tokenId")
+        binding = DirectDebitBinding(
+            participant_id=registration.participant_id,
+            channel_code=channel_code,
+            customer_reference=customer_reference,
+            provider_reference_no=response.get("referenceNo"),
+            token_id=token,
+            status=str(additional.get("status") or "pending").lower(),
+            raw_response=json.dumps(response),
+        )
+        session.add(binding)
+        await session.commit()
+        await session.refresh(binding)
+        return schemas.DirectDebitBindingResponse(binding_id=binding.id, channel_code=channel_code, status=binding.status, redirect_url=response.get("redirectUrl") or response.get("webRedirectUrl"))
+
+    @staticmethod
+    async def create_doku_direct_debit_payment(session: AsyncSession, payload: schemas.CreateDirectDebitPaymentRequest, user_id: uuid.UUID) -> schemas.DirectDebitPaymentResponse:
+        bindings = await PaymentRepository.get_direct_debit_binding_for_user(session, payload.binding_id, user_id)
+        if not bindings or not bindings.token_id:
+            raise ValidationException("DOKU_DIRECT_DEBIT_BINDING_REQUIRED", "Binding Direct Debit aktif tidak ditemukan")
+        registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+        registration = next((row for row in registrations if row.id == payload.registration_id and row.participant_id == bindings.participant_id), None)
+        if not registration:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan untuk binding ini")
+        order = await PaymentRepository.get_latest_order(session, registration.id)
+        if order and order.status == OrderStatus.PAID:
+            raise ConflictException("ORDER_ALREADY_PAID", "Registrasi ini sudah dibayar")
+        if not order or order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+            order = await PaymentRepository.create_order(session, registration.id)
+        if order.currency.upper() != "IDR":
+            raise ValidationException("DOKU_IDR_REQUIRED", "Direct Debit hanya menerima tagihan IDR")
+        payment = await PaymentRepository.get_payment_by_order(session, order.id)
+        if payment and payment.provider not in {"doku", "doku_snap_direct_debit"}:
+            raise ConflictException("LEGACY_PAYMENT_PENDING", "Batalkan transaksi gateway lama terlebih dahulu")
+        reference = f"DD{uuid.uuid4().hex[:10].upper()}"
+        if not payment:
+            from app.modules.payments.models import Payment
+            payment = Payment(order_id=order.id, provider="doku_snap_direct_debit", provider_order_id=reference, payment_type="doku_snap_direct_debit", channel_code=bindings.channel_code, gross_amount=order.total_amount, currency=order.currency, transaction_status=PaymentStatus.PENDING)
+            session.add(payment)
+        else:
+            payment.provider, payment.provider_order_id, payment.payment_type, payment.channel_code, payment.transaction_status = "doku_snap_direct_debit", reference, "doku_snap_direct_debit", bindings.channel_code, PaymentStatus.PENDING
+        await session.flush()
+        channel = DokuSnapClient().direct_debit_channels().get(bindings.channel_code)
+        body = {"partnerReferenceNo": reference, "amount": {"value": str(order.total_amount), "currency": "IDR"}, "additionalInfo": {"channel": (channel or {}).get("channel") or f"DIRECT_DEBIT_{bindings.channel_code}_SNAP", "remarks": f"IWBIF {registration.registration_number}"}}
+        response, external_id = await DokuSnapClient().direct_debit_request(bindings.channel_code, "/direct-debit/core/v1/debit/payment-host-to-host", body, customer_token=bindings.token_id)
+        payment.external_id, payment.provider_reference_no, payment.checkout_url, payment.raw_response = external_id, response.get("referenceNo"), response.get("webRedirectUrl") or response.get("redirectUrl"), json.dumps(response)
+        await session.commit()
+        return schemas.DirectDebitPaymentResponse(payment_id=payment.id, order_id=order.id, partner_reference_no=reference, status=payment.transaction_status, redirect_url=payment.checkout_url)
+
+    @staticmethod
+    async def verify_doku_direct_debit_otp(session: AsyncSession, payment_id: uuid.UUID, payload: schemas.VerifyDirectDebitOtpRequest, user_id: uuid.UUID) -> dict[str, Any]:
+        payment = await PaymentRepository.get_payment_for_user(session, payment_id, user_id)
+        binding = await PaymentRepository.get_direct_debit_binding_for_user(session, payload.binding_id, user_id)
+        if not payment or payment.provider != "doku_snap_direct_debit" or not binding or not binding.token_id:
+            raise NotFoundException("DOKU_DIRECT_DEBIT_PAYMENT_NOT_FOUND", "Pembayaran atau binding Direct Debit tidak ditemukan")
+        if payment.channel_code != binding.channel_code or not payment.provider_order_id:
+            raise ValidationException("DOKU_DIRECT_DEBIT_BINDING_MISMATCH", "Binding tidak sesuai dengan pembayaran")
+        if not payload.otp.isdigit() or len(payload.otp) != 6:
+            raise ValidationException("DOKU_DIRECT_DEBIT_INVALID_OTP", "OTP harus terdiri dari 6 digit")
+        channel = DokuSnapClient().direct_debit_channels().get(binding.channel_code) or {}
+        body = {"originalPartnerReferenceNo": payment.provider_order_id, "otp": payload.otp, "action": "otpPayment", "additionalInfo": {"channel": channel.get("channel") or f"DIRECT_DEBIT_{binding.channel_code}_SNAP", "bankCardToken": binding.token_id}}
+        response, external_id = await DokuSnapClient().direct_debit_request(binding.channel_code, "/direct-debit/core/v1/otp-verification", body, customer_token=binding.token_id)
+        payment.external_id, payment.raw_response = external_id, json.dumps(response)
+        await session.commit()
+        return response
     @staticmethod
     async def create_doku_direct_va(session: AsyncSession, payload: schemas.CreateDokuDirectVARequest, user_id: uuid.UUID) -> schemas.DokuDirectVAResponse:
         registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
@@ -146,6 +270,56 @@ class PaymentService:
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status="SUCCESS", payload=payload))
             await session.commit()
         return {"responseCode": "2002500", "responseMessage": "Successful", "virtualAccountData": {"partnerServiceId": payload.get("partnerServiceId"), "customerNo": payload.get("customerNo"), "virtualAccountNo": payload.get("virtualAccountNo"), "virtualAccountName": payload.get("virtualAccountName"), "trxId": payload.get("trxId"), "paymentRequestId": payload.get("paymentRequestId"), "paidAmount": payload.get("paidAmount")}}
+
+    @staticmethod
+    async def handle_doku_snap_direct_debit_notification(session: AsyncSession, payload: dict[str, Any], headers: dict[str, str], *, e_wallet: bool = False) -> dict[str, Any]:
+        settings = get_settings()
+        timestamp, signature = headers.get("x-timestamp", ""), headers.get("x-signature", "")
+        external_id, authorization = headers.get("x-external-id", ""), headers.get("authorization", "")
+        if not all((timestamp, signature, external_id, authorization)) or not authorization.startswith("Bearer "):
+            raise ValidationException("DOKU_SNAP_INVALID_HEADERS", "Header notification Direct Debit tidak lengkap")
+        ensure_fresh_timestamp(timestamp)
+        token = authorization[7:]
+        if not verify_merchant_token(token):
+            raise ValidationException("DOKU_SNAP_INVALID_TOKEN", "Bearer token notification tidak valid")
+        additional = payload.get("additionalInfo") or {}
+        channel_value = str(additional.get("channel") or payload.get("channel") or "").upper()
+        client = DokuSnapClient()
+        channels = client.e_wallet_channels() if e_wallet else client.direct_debit_channels()
+        channel_key, config = next(((key, item) for key, item in channels.items() if str(item.get("channel") or "").upper() == channel_value), (None, None))
+        if not config:
+            raise ValidationException("DOKU_DIRECT_DEBIT_UNKNOWN_CHANNEL", "Channel Direct Debit notification tidak dikonfigurasi")
+        secret = str(config.get("consumer_secret") or settings.DOKU_SNAP_CLIENT_SECRET)
+        notification_path = settings.DOKU_SNAP_EWALLET_NOTIFICATION_PATH if e_wallet else settings.DOKU_SNAP_DIRECT_DEBIT_NOTIFICATION_PATH
+        if not secret or not verify_symmetric_signature(signature, "POST", notification_path, token, payload, timestamp, secret):
+            raise ValidationException("DOKU_SNAP_INVALID_SIGNATURE", "Signature notification pembayaran tidak valid")
+        reference = str(payload.get("partnerReferenceNo") or payload.get("originalPartnerReferenceNo") or "")
+        if not reference:
+            raise ValidationException("DOKU_SNAP_INVALID_PAYLOAD", "partnerReferenceNo wajib ada")
+        payment = await PaymentRepository.get_payment_by_provider_order_id(session, reference, lock=True)
+        if not payment:
+            raise NotFoundException("DOKU_SNAP_PAYMENT_NOT_FOUND", "Pembayaran Direct Debit tidak ditemukan")
+        order = await session.get(Order, payment.order_id, with_for_update=True)
+        if not order:
+            raise NotFoundException("DOKU_ORDER_NOT_FOUND", "Order tidak ditemukan")
+        amount = payload.get("amount") or payload.get("paidAmount") or {}
+        if amount.get("value") is not None and Decimal(str(amount["value"])) != Decimal(str(order.total_amount)):
+            raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal pembayaran Direct Debit tidak sesuai order")
+        status = str(payload.get("latestTransactionStatus") or payload.get("transactionStatus") or payload.get("status") or "SUCCESS").upper()
+        provider = "doku_snap_e_wallet" if e_wallet else "doku_snap_direct_debit"
+        if not await PaymentRepository.get_webhook_event(session, external_id, provider):
+            if status in {"SUCCESS", "PAID", "00"}:
+                order.status, payment.transaction_status, payment.paid_at = OrderStatus.PAID, PaymentStatus.SUCCESS, datetime.now(timezone.utc)
+                registration = await session.get(Registration, order.registration_id, with_for_update=True)
+                if registration and registration.status != RegistrationStatus.CONFIRMED:
+                    registration.status = RegistrationStatus.PAID
+            elif status in {"FAILED", "CANCELLED", "CANCELED"}:
+                order.status, payment.transaction_status = OrderStatus.CANCELED, PaymentStatus.FAILED
+            payment.channel_code = channel_value or channel_key
+            payment.raw_response = json.dumps(payload)
+            session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status=status, payload=payload))
+            await session.commit()
+        return {"responseCode": "2005400", "responseMessage": "Successful", "partnerReferenceNo": reference, "additionalInfo": {}}
     @staticmethod
     async def create_doku_checkout(
         session: AsyncSession,

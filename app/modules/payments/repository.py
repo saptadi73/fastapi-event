@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
-from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
+from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
 from app.modules.registrations.models import Registration
 from app.modules.participants.models import ParticipantProfile
 
@@ -102,6 +102,20 @@ class PaymentRepository:
         stmt = select(Payment).where(Payment.virtual_account_no == virtual_account_no)
         if lock:
             stmt = stmt.with_for_update()
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def get_payment_by_provider_order_id(session: AsyncSession, provider_order_id: str, lock: bool = False) -> Payment | None:
+        stmt = select(Payment).where(Payment.provider_order_id == provider_order_id)
+        if lock:
+            stmt = stmt.with_for_update()
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def get_direct_debit_binding_for_user(session: AsyncSession, binding_id: uuid.UUID, user_id: uuid.UUID) -> DirectDebitBinding | None:
+        stmt = (select(DirectDebitBinding)
+                .join(ParticipantProfile, DirectDebitBinding.participant_id == ParticipantProfile.id)
+                .where(DirectDebitBinding.id == binding_id, ParticipantProfile.user_id == user_id))
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod

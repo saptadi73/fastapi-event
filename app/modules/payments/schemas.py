@@ -1,16 +1,92 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
 
 
+class PaymentChannelWrite(BaseModel):
+    provider: str = "doku"
+    code: str
+    category: str
+    display_name: str
+    logo_url: str | None = None
+    config_key: str | None = None
+    merchant_id: str | None = None
+    sub_merchant_id: str | None = None
+    terminal_id: str | None = None
+    is_enabled: bool = False
+    sort_order: int = Field(default=100, ge=0)
+
+
+class PaymentChannelRead(PaymentChannelWrite):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+
+
+class PublicPaymentMethodRead(BaseModel):
+    id: UUID
+    provider: str
+    code: str
+    category: str
+    display_name: str
+    logo_url: str | None = None
+    sort_order: int
+
+
 class CreateDokuDirectVARequest(BaseModel):
     registration_id: UUID
     bank_code: str
+
+
+class CreateDokuQrisRequest(BaseModel):
+    registration_id: UUID
+
+
+class DokuQrisResponse(BaseModel):
+    payment_id: UUID
+    order_id: UUID
+    order_number: str
+    status: str
+    qr_content: str
+    amount: float
+    currency: str
+    expires_at: datetime | None = None
+
+
+class CreateDirectDebitBindingRequest(BaseModel):
+    registration_id: UUID
+    channel_code: str
+    phone_no: str
+    device_id: str | None = None
+
+
+class DirectDebitBindingResponse(BaseModel):
+    binding_id: UUID
+    channel_code: str
+    status: str
+    redirect_url: str | None = None
+
+
+class CreateDirectDebitPaymentRequest(BaseModel):
+    registration_id: UUID
+    binding_id: UUID
+
+
+class DirectDebitPaymentResponse(BaseModel):
+    payment_id: UUID
+    order_id: UUID
+    partner_reference_no: str
+    status: str
+    redirect_url: str | None = None
+
+
+class VerifyDirectDebitOtpRequest(BaseModel):
+    binding_id: UUID
+    otp: str
 
 
 class DokuDirectVAResponse(BaseModel):

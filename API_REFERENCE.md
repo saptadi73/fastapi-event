@@ -506,6 +506,35 @@ Fields: `id`, `user_id`, `event_id`, `type`, `title`, `body`, `entity_type`,
 
 ## 12. DOKU Direct API SNAP
 
+### Katalog payment method untuk frontend
+
+```http
+GET /api/v1/payments/methods
+```
+
+Endpoint ini membaca channel aktif dari database, bukan memanggil DOKU pada
+setiap halaman. Respons publik memuat `id`, `provider`, `code`, `category`,
+`display_name`, `logo_url`, dan `sort_order`; metadata merchant serta credential
+rahasia tidak pernah dikembalikan.
+
+Admin mengelola katalog melalui:
+
+```http
+GET|POST /api/v1/admin/payment-channels
+PUT|DELETE /api/v1/admin/payment-channels/{channel_id}
+```
+
+Contoh payload create/update:
+
+```json
+{"provider":"doku","code":"DANA","category":"e_wallet","display_name":"DANA","logo_url":"https://...","config_key":"DOKU_EWALLET_DANA","sub_merchant_id":"...","is_enabled":true,"sort_order":20}
+```
+
+Katalog di-seed oleh `python scripts/seed_payment_channels.py`; seluruh item
+awal nonaktif. Aktifkan melalui admin hanya setelah channel aktif di DOKU dan
+secret backend lengkap. `logo_url` adalah URL aset yang dikelola operator;
+backend tidak mengunduh logo dari DOKU saat request frontend.
+
 Flow frontend: ambil bank → pilih bank → buat VA → tampilkan VA/expiry/instruksi
 → poll status. Notification DOKU adalah penentu status final.
 
@@ -555,12 +584,111 @@ POST /api/v1/webhooks/doku/snap/va/payment
 POST /api/v1/webhooks/doku
 ```
 
+### SNAP Direct Debit (CIMB, BRI, Mandiri, Allo)
+
+Direct Debit memakai endpoint generik; `channel_code` memilih kanal bank yang
+credential-nya tersimpan di server. Frontend tidak pernah menerima Consumer
+Secret, Merchant ID, Terminal ID, atau token rekening.
+
+```http
+POST /api/v1/payments/doku/snap/direct-debit/bindings
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"registration_id":"uuid","channel_code":"CIMB","phone_no":"628123456789","device_id":"optional-device-id"}
+```
+
+Respons: `binding_id`, `channel_code`, `status`, dan `redirect_url`. Arahkan
+browser ke `redirect_url` apabila disediakan DOKU untuk otorisasi bank/OTP/PIN.
+
+```http
+POST /api/v1/payments/doku/snap/direct-debit/payment
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"registration_id":"uuid","binding_id":"uuid"}
+```
+
+Respons berisi `payment_id`, `order_id`, `partner_reference_no`, `status`, dan
+`redirect_url`. Kanal yang meminta OTP menggunakan:
+
+```http
+POST /api/v1/payments/doku/snap/direct-debit/payment/{payment_id}/otp
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"binding_id":"uuid","otp":"123456"}
+```
+
+Server-to-server, **jangan dipanggil frontend**:
+
+```http
+POST /api/v1/webhooks/doku/snap/direct-debit/payment
+```
+
+`GET /api/v1/payments/doku/snap/direct-debit/binding/return` adalah browser
+landing URL setelah proses binding; endpoint ini tidak menetapkan status paid.
+
+Konfigurasi dashboard DOKU untuk seluruh kanal Direct Debit:
+
+```text
+Binding URL: https://api-event.gagakrimang.web.id/api/v1/payments/doku/snap/direct-debit/binding/return
+Payment Notification URL: https://api-event.gagakrimang.web.id/api/v1/webhooks/doku/snap/direct-debit/payment
+```
+
+Callback memvalidasi signature SNAP, nominal, dan idempotensi `X-EXTERNAL-ID`.
+Pembayaran sukses mengubah payment/order/registrasi menjadi paid dan muncul pada
+laporan pendapatan berdasarkan `channel_code`.
+
+### SNAP e-Wallet callback
+
+e-Wallet memakai URL sendiri dan tidak boleh dikirim ke webhook Direct Debit:
+
+```text
+Authorization Return URL: https://api-event.gagakrimang.web.id/api/v1/payments/doku/snap/e-wallet/authorization/return
+Payment Notification URL: https://api-event.gagakrimang.web.id/api/v1/webhooks/doku/snap/e-wallet/payment
+```
+
+Authorization return adalah browser landing. `POST /api/v1/webhooks/doku/snap/e-wallet/payment`
+khusus dipanggil DOKU, memverifikasi signature SNAP dengan credential kanal, dan
+memproses callback secara idempoten.
+
 Endpoint itu memakai acknowledgment/signature DOKU, bukan envelope biasa.
 `POST /api/v1/payments/doku/checkout` adalah fallback lama; flow utama Direct VA.
 Setelah Checkout, DOKU dapat mengarahkan browser ke
 `GET /api/v1/payments/doku/return`. Endpoint ini hanya landing page dan tidak
 pernah mengubah status pembayaran; frontend tetap membaca order/invoice setelah
 notification terverifikasi oleh backend.
+
+### QRIS melalui DOKU Checkout
+
+QRIS Direct diaktifkan bila `DOKU_QRIS_MERCHANT_ID` dan
+`DOKU_QRIS_TERMINAL_ID` telah diisi pada secret manager. Frontend membuat QR
+dinamis lewat endpoint berikut dan menampilkan `qr_content` sebagai QR image:
+
+```http
+POST /api/v1/payments/doku/direct/qris
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{"registration_id":"uuid"}
+```
+
+Respons berisi `payment_id`, `order_id`, `order_number`, `status`, `qr_content`,
+`amount`, `currency`, dan `expires_at`. Bila konfigurasi lengkap, endpoint
+`GET /api/v1/payments/doku/direct/methods` mengembalikan `qris: true`.
+
+Konfigurasi **QR Payment → Notify URL** di dashboard DOKU:
+
+```text
+https://api-event.gagakrimang.web.id/api/v1/webhooks/doku
+```
+
+Endpoint tersebut memverifikasi signature Checkout/Non-SNAP dan memperbarui
+payment, order, registrasi, serta laporan pendapatan saat notifikasi sukses.
+Browser callback/redirect bukan bukti pembayaran. Frontend mem-poll
+`GET /api/v1/payments/{payment_id}` dan hanya menampilkan sukses setelah
+notifikasi DOKU tervalidasi backend.
 
 ### Laporan pembayaran dan pendapatan organizer
 

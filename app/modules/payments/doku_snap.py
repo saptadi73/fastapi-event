@@ -158,6 +158,50 @@ class DokuSnapClient:
             raise ValidationException("DOKU_SNAP_INVALID_CONFIG", "DOKU_SNAP_VA_CHANNELS_JSON tidak valid") from exc
         return {str(k).upper(): v for k, v in value.items() if isinstance(v, dict)}
 
+    def direct_debit_channels(self) -> dict[str, dict[str, str]]:
+        try:
+            value = json.loads(self.settings.DOKU_SNAP_DIRECT_DEBIT_CHANNELS_JSON)
+        except ValueError as exc:
+            raise ValidationException("DOKU_DIRECT_DEBIT_INVALID_CONFIG", "DOKU_SNAP_DIRECT_DEBIT_CHANNELS_JSON tidak valid") from exc
+        return {str(key).upper(): item for key, item in value.items() if isinstance(item, dict)}
+
+    def e_wallet_channels(self) -> dict[str, dict[str, str]]:
+        try:
+            value = json.loads(self.settings.DOKU_SNAP_EWALLET_CHANNELS_JSON)
+        except ValueError as exc:
+            raise ValidationException("DOKU_EWALLET_INVALID_CONFIG", "DOKU_SNAP_EWALLET_CHANNELS_JSON tidak valid") from exc
+        return {str(key).upper(): item for key, item in value.items() if isinstance(item, dict)}
+
+    async def direct_debit_request(self, channel_code: str, path: str, payload: dict[str, Any], *, customer_token: str | None = None) -> tuple[dict[str, Any], str]:
+        """Send a channel-specific SNAP Direct Debit request.
+
+        DOKU issues Consumer Key/Secret per Direct Debit channel; they must not
+        be conflated with the merchant's VA credential.
+        """
+        config = self.direct_debit_channels().get(channel_code.upper())
+        if not config:
+            raise ValidationException("DOKU_DIRECT_DEBIT_CHANNEL_NOT_CONFIGURED", f"Direct Debit {channel_code.upper()} belum dikonfigurasi")
+        partner_id = str(config.get("consumer_key") or self.settings.DOKU_SNAP_PARTNER_ID)
+        secret = str(config.get("consumer_secret") or self.settings.DOKU_SNAP_CLIENT_SECRET)
+        if not partner_id or not secret:
+            raise ValidationException("DOKU_DIRECT_DEBIT_NOT_CONFIGURED", "Consumer Key/Secret Direct Debit belum dikonfigurasi")
+        token = await self.access_token()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        external_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(10**8):08d}"
+        headers = {
+            "X-TIMESTAMP": timestamp,
+            "X-PARTNER-ID": partner_id,
+            "X-EXTERNAL-ID": external_id,
+            "CHANNEL-ID": self.settings.DOKU_SNAP_CHANNEL_ID,
+            "Authorization": f"Bearer {token}",
+            "X-SIGNATURE": symmetric_signature("POST", path, token, payload, timestamp, secret),
+            "Content-Type": "application/json",
+        }
+        if customer_token:
+            headers["Authorization-Customer"] = f"Bearer {customer_token}"
+        data, _ = await self._send(path, headers, payload)
+        return data, external_id
+
     async def create_va(self, bank_code: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         self._validate()
         config = self.va_channels().get(bank_code.upper())
@@ -167,6 +211,20 @@ class DokuSnapClient:
         payload["partnerServiceId"] = config["partner_service_id"]
         if "customer_no" in config:
             payload["customerNo"] = str(config["customer_no"])
+        token = await self.access_token()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        external_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(10**8):08d}"
+        headers = {"X-TIMESTAMP": timestamp, "X-PARTNER-ID": self.settings.DOKU_SNAP_PARTNER_ID, "X-EXTERNAL-ID": external_id, "CHANNEL-ID": self.settings.DOKU_SNAP_CHANNEL_ID, "Authorization": f"Bearer {token}", "X-SIGNATURE": symmetric_signature("POST", path, token, payload, timestamp, self.settings.DOKU_SNAP_CLIENT_SECRET), "Content-Type": "application/json"}
+        data, _ = await self._send(path, headers, payload)
+        return data, external_id
+
+    async def create_qris(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        self._validate()
+        if not self.settings.DOKU_QRIS_MERCHANT_ID or not self.settings.DOKU_QRIS_TERMINAL_ID:
+            raise ValidationException("DOKU_QRIS_NOT_CONFIGURED", "Merchant ID atau Terminal ID QRIS belum dikonfigurasi")
+        path = self.settings.DOKU_SNAP_QRIS_GENERATE_PATH
+        payload["merchantId"] = self.settings.DOKU_QRIS_MERCHANT_ID
+        payload["terminalId"] = self.settings.DOKU_QRIS_TERMINAL_ID
         token = await self.access_token()
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         external_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"{secrets.randbelow(10**8):08d}"

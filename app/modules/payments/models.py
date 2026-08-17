@@ -77,3 +77,40 @@ class PaymentWebhookEvent(Base):
     event_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DirectDebitBinding(Base):
+    """Tokenised Direct Debit account binding; never stores account/card numbers."""
+    __tablename__ = "direct_debit_bindings"
+    __table_args__ = (UniqueConstraint("participant_id", "channel_code", "token_id", name="uq_direct_debit_binding_token"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    participant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
+    channel_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    customer_reference: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_reference_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    token_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PaymentChannel(Base):
+    __tablename__ = "payment_channels"
+    __table_args__ = (UniqueConstraint("provider", "code", name="uq_payment_channel_provider_code"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="doku")
+    code: Mapped[str] = mapped_column(String(60), nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    logo_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    config_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    merchant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sub_merchant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    terminal_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=100)

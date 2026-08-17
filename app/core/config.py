@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     DOKU_SNAP_VA_CREATE_PATH: str = "/virtual-accounts/bi-snap-va/v1.1/transfer-va/create-va"
     DOKU_SNAP_MERCHANT_TOKEN_PATH: str = "/api/v1/doku/snap/authorization/v1/access-token/b2b"
     DOKU_SNAP_VA_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku/snap/va/payment"
+    DOKU_QRIS_MERCHANT_ID: str = ""
+    DOKU_QRIS_TERMINAL_ID: str = ""
+    DOKU_SNAP_QRIS_GENERATE_PATH: str = "/snap-adapter/b2b/v1.0/qr/qr-mpm-generate"
+    DOKU_SNAP_QRIS_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku/snap/qris/payment"
+    DOKU_SNAP_EWALLET_CHANNELS_JSON: str = "{}"
+    DOKU_SNAP_EWALLET_AUTHORIZATION_RETURN_PATH: str = "/api/v1/payments/doku/snap/e-wallet/authorization/return"
+    DOKU_SNAP_EWALLET_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku/snap/e-wallet/payment"
+    # Per-channel credentials for SNAP Direct Debit. Keep secrets only in the
+    # deployment secret store, never in source control.
+    DOKU_SNAP_DIRECT_DEBIT_CHANNELS_JSON: str = "{}"
+    DOKU_SNAP_DIRECT_DEBIT_BINDING_RETURN_PATH: str = "/api/v1/payments/doku/snap/direct-debit/binding/return"
+    DOKU_SNAP_DIRECT_DEBIT_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku/snap/direct-debit/payment"
     DOKU_SNAP_TOKEN_TTL_SECONDS: int = 900
     DOKU_SNAP_TIMESTAMP_TOLERANCE_SECONDS: int = 300
 

@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.modules.users.models import User
@@ -13,15 +14,56 @@ from app.modules.payments.service import PaymentService
 from app.modules.payments.doku_snap import DokuSnapClient
 from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
 from app.core.exceptions import AppException, ValidationException
+from app.core.config import get_settings
+from app.modules.payments.models import PaymentChannel
+from app.core.exceptions import NotFoundException
 
 router = APIRouter(tags=["payments"])
 logger = logging.getLogger(__name__)
 
 
+@router.get("/payments/methods", summary="List active payment methods for frontend")
+async def list_payment_methods(request: Request, db: AsyncSession = Depends(get_db_session)):
+    rows = (await db.execute(select(PaymentChannel).where(PaymentChannel.is_enabled.is_(True)).order_by(PaymentChannel.sort_order, PaymentChannel.display_name))).scalars().all()
+    return success_response("Metode pembayaran aktif", data=[schemas.PublicPaymentMethodRead.model_validate(row) for row in rows], request=request)
+
+
+@router.get("/admin/payment-channels", summary="List payment channel catalog")
+async def admin_list_payment_channels(request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    rows = (await db.execute(select(PaymentChannel).order_by(PaymentChannel.sort_order, PaymentChannel.display_name))).scalars().all()
+    return success_response("Katalog payment channel", data=[schemas.PaymentChannelRead.model_validate(row) for row in rows], request=request)
+
+
+@router.post("/admin/payment-channels", summary="Create payment channel")
+async def admin_create_payment_channel(request: Request, payload: schemas.PaymentChannelWrite, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    item = PaymentChannel(**payload.model_dump())
+    db.add(item)
+    await db.commit(); await db.refresh(item)
+    return success_response("Payment channel dibuat", data=schemas.PaymentChannelRead.model_validate(item), request=request)
+
+
+@router.put("/admin/payment-channels/{channel_id}", summary="Update payment channel")
+async def admin_update_payment_channel(request: Request, channel_id: uuid.UUID, payload: schemas.PaymentChannelWrite, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    item = await db.get(PaymentChannel, channel_id)
+    if not item: raise NotFoundException("PAYMENT_CHANNEL_NOT_FOUND", "Payment channel tidak ditemukan")
+    for key, value in payload.model_dump().items(): setattr(item, key, value)
+    await db.commit(); await db.refresh(item)
+    return success_response("Payment channel diperbarui", data=schemas.PaymentChannelRead.model_validate(item), request=request)
+
+
+@router.delete("/admin/payment-channels/{channel_id}", summary="Delete payment channel")
+async def admin_delete_payment_channel(request: Request, channel_id: uuid.UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    item = await db.get(PaymentChannel, channel_id)
+    if not item: raise NotFoundException("PAYMENT_CHANNEL_NOT_FOUND", "Payment channel tidak ditemukan")
+    await db.delete(item); await db.commit()
+    return success_response("Payment channel dihapus", data={"id": str(channel_id)}, request=request)
+
+
 @router.get("/payments/doku/direct/methods", summary="List configured DOKU Direct payment methods")
 async def doku_direct_methods(request: Request):
     banks = sorted(DokuSnapClient().va_channels())
-    return success_response("Metode DOKU Direct tersedia", data={"virtual_accounts": banks, "qris": False}, request=request)
+    settings = get_settings()
+    return success_response("Metode DOKU Direct tersedia", data={"virtual_accounts": banks, "qris": bool(settings.DOKU_QRIS_MERCHANT_ID and settings.DOKU_QRIS_TERMINAL_ID)}, request=request)
 
 
 @router.post("/payments/doku/direct/va", summary="Create DOKU SNAP Virtual Account")
@@ -33,6 +75,51 @@ async def create_doku_direct_va(
 ):
     data = await PaymentService.create_doku_direct_va(db, payload, current_user.id)
     return success_response("Virtual Account DOKU berhasil dibuat", data=data.model_dump(), request=request)
+
+
+@router.post("/payments/doku/direct/qris", summary="Generate DOKU SNAP QRIS")
+async def create_doku_qris(
+    request: Request,
+    payload: schemas.CreateDokuQrisRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    data = await PaymentService.create_doku_qris(db, payload, current_user.id)
+    return success_response("QRIS DOKU berhasil dibuat", data=data.model_dump(), request=request)
+
+
+@router.post("/payments/doku/snap/direct-debit/bindings", summary="Start DOKU SNAP Direct Debit account binding")
+async def create_doku_direct_debit_binding(
+    request: Request,
+    payload: schemas.CreateDirectDebitBindingRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    data = await PaymentService.create_doku_direct_debit_binding(db, payload, current_user.id)
+    return success_response("Binding Direct Debit dibuat", data=data.model_dump(), request=request)
+
+
+@router.post("/payments/doku/snap/direct-debit/payment", summary="Create DOKU SNAP Direct Debit payment")
+async def create_doku_direct_debit_payment(
+    request: Request,
+    payload: schemas.CreateDirectDebitPaymentRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    data = await PaymentService.create_doku_direct_debit_payment(db, payload, current_user.id)
+    return success_response("Pembayaran Direct Debit dibuat", data=data.model_dump(), request=request)
+
+
+@router.post("/payments/doku/snap/direct-debit/payment/{payment_id}/otp", summary="Verify DOKU SNAP Direct Debit OTP")
+async def verify_doku_direct_debit_otp(
+    request: Request,
+    payment_id: uuid.UUID,
+    payload: schemas.VerifyDirectDebitOtpRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    data = await PaymentService.verify_doku_direct_debit_otp(db, payment_id, payload, current_user.id)
+    return success_response("OTP Direct Debit diproses", data=data, request=request)
 
 
 @router.post("/payments/doku/checkout", summary="Create DOKU Checkout payment")
@@ -62,6 +149,21 @@ async def doku_browser_return(request: Request):
         data={"payment_status_source": "doku_notification"},
         request=request,
     )
+
+
+@router.get("/payments/doku/snap/direct-debit/binding/return", summary="DOKU SNAP Direct Debit binding return landing")
+async def doku_direct_debit_binding_return(request: Request):
+    """Browser landing after bank binding; the signed API/callback remains authoritative."""
+    return success_response(
+        "Kembali dari proses binding Direct Debit. Periksa status binding melalui aplikasi.",
+        data={"binding_status_source": "doku_snap_direct_debit"},
+        request=request,
+    )
+
+
+@router.get("/payments/doku/snap/e-wallet/authorization/return", summary="DOKU SNAP e-Wallet authorization return landing")
+async def doku_e_wallet_authorization_return(request: Request):
+    return success_response("Kembali dari otorisasi e-Wallet. Periksa status pembayaran melalui aplikasi.", data={"payment_status_source": "doku_snap_e_wallet_notification"}, request=request)
 
 
 @router.get("/payments/{payment_id}", summary="Get payment")
@@ -233,3 +335,31 @@ async def doku_snap_va_notification(request: Request, db: AsyncSession = Depends
         await db.rollback()
         logger.exception("Unexpected DOKU SNAP VA notification error")
         return JSONResponse({"responseCode": "5002500", "responseMessage": "Internal Server Error"}, status_code=500)
+
+
+@router.post("/webhooks/doku/snap/direct-debit/payment", summary="DOKU SNAP Direct Debit payment notification")
+async def doku_snap_direct_debit_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    try:
+        body = await request.json()
+        return JSONResponse(await PaymentService.handle_doku_snap_direct_debit_notification(db, body, dict(request.headers)))
+    except (ValueError, AppException) as exc:
+        await db.rollback()
+        return JSONResponse({"responseCode": "4005400", "responseMessage": exc.message if isinstance(exc, AppException) else "Invalid JSON"}, status_code=400)
+    except Exception:
+        await db.rollback()
+        logger.exception("Unexpected DOKU SNAP Direct Debit notification error")
+        return JSONResponse({"responseCode": "5005400", "responseMessage": "Internal Server Error"}, status_code=500)
+
+
+@router.post("/webhooks/doku/snap/e-wallet/payment", summary="DOKU SNAP e-Wallet payment notification")
+async def doku_snap_e_wallet_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    try:
+        body = await request.json()
+        return JSONResponse(await PaymentService.handle_doku_snap_direct_debit_notification(db, body, dict(request.headers), e_wallet=True))
+    except (ValueError, AppException) as exc:
+        await db.rollback()
+        return JSONResponse({"responseCode": "4005400", "responseMessage": exc.message if isinstance(exc, AppException) else "Invalid JSON"}, status_code=400)
+    except Exception:
+        await db.rollback()
+        logger.exception("Unexpected DOKU SNAP e-Wallet notification error")
+        return JSONResponse({"responseCode": "5005400", "responseMessage": "Internal Server Error"}, status_code=500)
