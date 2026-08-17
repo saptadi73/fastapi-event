@@ -1,0 +1,57 @@
+# Production database migration
+
+Run this procedure from the deployed backend repository. It applies every
+committed Alembic revision, seeds the DOKU payment-channel catalog
+idempotently, and verifies the final revision and core IWBIF tables.
+
+## Before running
+
+1. Back up the production PostgreSQL database and verify that it can be
+   restored.
+2. Deploy the intended backend commit and install `requirements.txt`.
+3. Configure `APP_ENV=production` and the production `DATABASE_URL` in the
+   server environment. Do not place credentials in this command or commit
+   them to Git.
+4. Stop concurrent deployment jobs. The application may remain online when
+   migrations are backward compatible; otherwise use a maintenance window.
+
+## Execute
+
+From the repository root with its virtual environment activated:
+
+```bash
+python scripts/migrate_production.py --confirm-production
+```
+
+The script refuses to run unless `APP_ENV=production`, refuses a migration
+tree with multiple heads, tests the database connection, executes
+`alembic upgrade head`, runs `seed_payment_channels.py`, then checks
+`alembic_version` and required tables.
+
+To migrate schema without changing the payment-channel catalog:
+
+```bash
+python scripts/migrate_production.py --confirm-production --skip-payment-channel-seed
+```
+
+## Complete production seed
+
+The complete IWBIF seed includes reference data plus example users,
+registrations, successful payments, tickets, conversations, and business
+matching records. Run it only when those records are intentionally required.
+It is idempotent and does not reset passwords of accounts that already exist.
+
+Set a strong, temporary password through the server secret environment (never
+put it in Git or shell history), then run:
+
+```bash
+python scripts/migrate_production.py \
+  --confirm-production \
+  --seed-all \
+  --confirm-demo-data
+```
+
+`IWBIF_SEED_PASSWORD` must contain at least 16 characters. The known local
+demo password is rejected in production. Rotate or disable the seeded accounts
+after verification. Running the command again updates reference/demo content
+without duplicating its natural keys.

@@ -1,6 +1,7 @@
 """Idempotent, relationally consistent demo dataset for IWBIF 2026."""
 import asyncio
 import hashlib
+import os
 import sys
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionFactory, engine
+from app.core.config import get_settings
 from app.core.security import hash_password
 from app.modules.business_matching.models import (
     AuditLog, BusinessMatchingProfile, Conversation, ConversationParticipant,
@@ -61,10 +63,31 @@ async def ensure(db, model, defaults=None, **where):
         return row
     row = model(**where, **(defaults or {})); db.add(row); await db.flush(); return row
 
+async def ensure_user(db, *, email, password_hash, defaults):
+    """Create seed users without resetting passwords of existing accounts."""
+    row = await one(db, User, email=email)
+    if row:
+        for key, value in defaults.items():
+            if key != "password_hash":
+                setattr(row, key, value)
+        return row
+    row = User(email=email, password_hash=password_hash, **defaults)
+    db.add(row); await db.flush(); return row
+
 def at(day, hour=0, minute=0):
     return datetime(2026, 10, day, hour, minute, tzinfo=TZ)
 
 async def seed():
+    settings = get_settings()
+    seed_password = os.getenv("IWBIF_SEED_PASSWORD", "")
+    if settings.APP_ENV.lower() == "production":
+        if len(seed_password) < 16:
+            raise RuntimeError("IWBIF_SEED_PASSWORD (minimum 16 characters) is required for production seed data")
+        if seed_password == "IwbifDemo2026!":
+            raise RuntimeError("the documented demo password is forbidden in production")
+    elif not seed_password:
+        seed_password = "IwbifDemo2026!"
+
     async with AsyncSessionFactory() as db:
         event = await ensure(db, Event, slug=EVENT_SLUG, defaults=dict(name="International Women Business & Investment Forum 2026", description="Empowering Women Entrepreneurs Through Finance, Global Collaboration, and Digital Transformation", venue_name="Hotel Indonesia Kempinski Jakarta", venue_address="Jl. M.H. Thamrin No. 1, Jakarta", timezone="Asia/Jakarta", start_at=at(14), end_at=at(17, 23, 59), capacity=500, status=EventStatus.PUBLISHED))
 
@@ -84,12 +107,12 @@ async def seed():
         for day, start, end, label in PROFILE_SLOTS:
             profile_slots.append(await ensure(db, BusinessMatchingSlot, event_id=event.id, label=label, defaults=dict(slot_date=day, start_time=start, end_time=end, capacity=125, is_active=True)))
 
-        password = hash_password("IwbifDemo2026!")
-        admin = await ensure(db, User, email="organizer@iwbif2026.org", defaults=dict(password_hash=password, full_name="IWBIF 2026 Organizer", phone="+6281100002026", status="active", role="organizer", is_email_verified=True))
+        password = hash_password(seed_password)
+        admin = await ensure_user(db, email="organizer@iwbif2026.org", password_hash=password, defaults=dict(full_name="IWBIF 2026 Organizer", phone="+6281100002026", status="active", role="organizer", is_email_verified=True))
         users, participants, registrations, profiles = [], [], [], []
         activity_ids = [str(x.id) for x in activity.values()]
         for idx, (email, full_name, company, job, country, sector, package_code, looking, preferred, interests, needs) in enumerate(DELEGATES, 1):
-            user = await ensure(db, User, email=email, defaults=dict(password_hash=password, full_name=full_name, phone=f"+628120026{idx:04d}", status="active", role="participant", is_email_verified=True))
+            user = await ensure_user(db, email=email, password_hash=password, defaults=dict(full_name=full_name, phone=f"+628120026{idx:04d}", status="active", role="participant", is_email_verified=True))
             participant = await ensure(db, ParticipantProfile, user_id=user.id, defaults=dict(full_name=full_name, organization_name=company, biography=f"{job} at {company}, focused on cross-border women-led business growth.", profile_photo_url=f"https://ui-avatars.com/api/?name={full_name.replace(' ', '+')}"))
             company_row = await ensure(db, Company, participant_id=participant.id, defaults=dict(name=company, country=country, address=f"Business District, {country}", website=f"https://{company.lower().replace(' ', '')}.example"))
             reg = await ensure(db, Registration, event_id=event.id, participant_id=participant.id, defaults=dict(registration_number=f"IWBIF26-{idx:04d}", status=RegistrationStatus.CONFIRMED, dietary_preference="Halal meal", accessibility_requirements=None, emergency_contact_name=f"Emergency Contact {idx}", emergency_contact_phone=f"+628139900{idx:04d}", consent_snapshot="terms:v1;privacy:v1;business_matching:v1", confirmed_at=at(1 + idx, 9)))
@@ -193,8 +216,7 @@ async def seed():
 
         await db.commit()
         print(f"Seeded complete IWBIF dataset for event {event.id}")
-        print("Organizer: organizer@iwbif2026.org / IwbifDemo2026!")
-        print("Delegate:  sari@nusantarafoods.id / IwbifDemo2026!")
+        print("Seed accounts created. Password is sourced from IWBIF_SEED_PASSWORD and is not displayed.")
     await engine.dispose()
 
 if __name__ == "__main__": asyncio.run(seed())
