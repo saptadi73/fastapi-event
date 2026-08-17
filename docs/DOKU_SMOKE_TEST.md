@@ -7,21 +7,45 @@ Berikut script untuk melakukan pemeriksaan cepat integrasi pembayaran DOKU di ba
 
 ## Cara pakai
 
+Pastikan dependency backend telah terpasang terlebih dahulu:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+```bash
+export DOKU_SMOKE_USER_PASSWORD='set-through-server-secret-store'
+python scripts/doku_smoke_test.py \
+  --base-url https://api-event.gagakrimang.web.id \
+  --email peserta.or.admin@email \
+  --registration-id <REGISTRATION_UUID> \
+  --bank-code MANDIRI \
+  --output-dir reports
+```
+
+Untuk membuat satu Virtual Account sandbox dan memverifikasi record
+payment/order:
+
 ```bash
 python scripts/doku_smoke_test.py \
   --base-url https://api-event.gagakrimang.web.id \
   --email peserta.or.admin@email \
-  --password "********" \
   --registration-id <REGISTRATION_UUID> \
   --bank-code MANDIRI \
-  --run-webhook \
-  --output-dir reports
+  --mode payment-only \
+  --execute-payment \
+  --assert-on-failure \
+  --required-steps health,openapi_doku_endpoints,login,doku_direct_methods,create_doku_direct_va \
+  --assert-payment-status PENDING,SUCCESS
 ```
 
 Parameter penting:
 
 - `--base-url`: domain backend aktif.
-- `--email`, `--password`: akun untuk login ke API.
+- `--email`: akun untuk login ke API.
+- `--password-env`: nama environment variable password login; default
+  `DOKU_SMOKE_USER_PASSWORD`. Hindari `--password` karena dapat terlihat dalam
+  process list atau shell history.
 - `--registration-id` (opsional): jika tidak diisi, script ambil invoice pertama dari `/api/v1/payments/me/invoices`.
 - `--bank-code`: kode bank VA yang valid dari metode yang aktif (`MANDIRI`, `BCA`, `BNI`, `BRI`).
 - `--run-webhook`: aktifkan simulasi callback DOKU (legacy + SNAP).
@@ -32,7 +56,9 @@ Parameter penting:
   - `payment-only`: hanya sampai create VA, tanpa webhook
   - `snap-only`: payment + SNAP webhook
   - `legacy-only`: payment + legacy webhook
-- `--dry-run`: hanya cek login, metode, dan pemilihan registrasi (tanpa membuat transaksi).
+- Tanpa `--execute-payment`, script hanya menjalankan readiness check dan tidak
+  membuat transaksi.
+- `--execute-payment`: mengizinkan pembuatan transaksi sandbox secara eksplisit.
 - `--output-dir`: lokasi file report.
 - `--assert-on-failure`: exit code non-zero jika hasil gagal (dan mengecek required-step jika diset).
 - `--required-steps`: list step wajib, contoh `login,doku_direct_methods,create_doku_direct_va`.
@@ -59,12 +85,13 @@ Catatan:
 
 ## Flow yang dijalankan script
 
-1. Login ke `/auth/login`.
-2. Cek metode VA dari `/api/v1/payments/doku/direct/methods`.
-3. Pilih `registration_id` dari argumen atau dari invoice user.
-4. Buat VA via `POST /api/v1/payments/doku/direct/va`.
-5. Ambil ulang payment dan order untuk verifikasi.
-6. Jika `--run-webhook`, kirim simulasi callback ke:
+1. Cek health, OpenAPI endpoint DOKU, dan katalog payment aktif.
+2. Login ke `/api/v1/auth/login`.
+3. Cek metode VA dari `/api/v1/payments/doku/direct/methods`.
+4. Pilih `registration_id` dari argumen atau dari invoice user.
+5. Jika `--execute-payment`, buat VA via `POST /api/v1/payments/doku/direct/va`.
+6. Ambil ulang payment dan order untuk verifikasi.
+7. Jika `--run-webhook`, kirim simulasi callback ke:
    - `POST /api/v1/webhooks/doku`
    - `POST /api/v1/webhooks/doku/snap/va/payment` (jika token mock tersedia)
 

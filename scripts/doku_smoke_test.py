@@ -26,7 +26,7 @@ import os
 import sys
 from typing import Any
 
-import requests
+import httpx
 
 
 def canonical_time() -> str:
@@ -37,7 +37,7 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def parse_success_payload(response: requests.Response, allow_status: set[int] | None = None) -> tuple[dict[str, Any], bool]:
+def parse_success_payload(response: httpx.Response, allow_status: set[int] | None = None) -> tuple[dict[str, Any], bool]:
     try:
         data = response.json()
     except ValueError:
@@ -84,7 +84,7 @@ class SmokeTestRunner:
         self.dry_run = dry_run
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.session = requests.Session()
+        self.session = httpx.Client(follow_redirects=False)
         self.report: dict[str, Any] = {
             "started_at": utc_now_iso(),
             "base_url": self.base_url,
@@ -100,15 +100,44 @@ class SmokeTestRunner:
         entry = {"step": step, "ok": ok, "detail": detail, "error": error}
         self.report["steps"].append(entry)
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         url = f"{self.base_url}{path}"
         headers = kwargs.pop("headers", {}) or {}
         if self.auth_token and "Authorization" not in headers:
             headers["Authorization"] = f"Bearer {self.auth_token}"
         return self.session.request(method, url, headers=headers, timeout=60, **kwargs)
 
+    def _test_public_api(self) -> None:
+        health = self._request("GET", "/api/v1/health")
+        self._log("health", health.status_code == 200, detail={"status_code": health.status_code})
+        openapi = self._request("GET", "/openapi.json")
+        try:
+            paths = set(openapi.json().get("paths", {}))
+        except (ValueError, AttributeError):
+            paths = set()
+        expected = {
+            "/api/v1/payments/methods",
+            "/api/v1/payments/doku/direct/va",
+            "/api/v1/payments/doku/direct/qris",
+            "/api/v1/webhooks/doku/snap/va/payment",
+            "/api/v1/webhooks/doku/snap/qris/payment",
+            "/api/v1/webhooks/doku/snap/e-wallet/payment",
+            "/api/v1/webhooks/doku/snap/direct-debit/payment",
+        }
+        missing = sorted(expected - paths)
+        self._log("openapi_doku_endpoints", openapi.status_code == 200 and not missing,
+                  detail={"status_code": openapi.status_code, "missing": missing})
+
+        methods = self._request("GET", "/api/v1/payments/methods")
+        data, ok = parse_success_payload(methods)
+        channel_rows = data if isinstance(data, list) else []
+        self._log("active_payment_catalog", ok, detail={
+            "count": len(channel_rows),
+            "channels": [row.get("code") for row in channel_rows if isinstance(row, dict)],
+        })
+
     def _load_user_and_settings(self) -> None:
-        response = self._request("POST", "/auth/login", json={"email": self.email, "password": self.password})
+        response = self._request("POST", "/api/v1/auth/login", json={"email": self.email, "password": self.password})
         data, ok = parse_success_payload(response)
         if not ok or not isinstance(data, dict):
             self._log("login", False, detail={"status_code": response.status_code, "response": data})
@@ -306,13 +335,15 @@ class SmokeTestRunner:
 
     def run(self) -> None:
         try:
+            self._test_public_api()
             self._load_user_and_settings()
             self._test_methods()
             self._fetch_doku_settings()
             registration_id = self._pick_registration()
             self._create_direct_va(registration_id)
-            self._refresh_order_and_payment(str(self.payment["order_id"]), str(self.payment["payment_id"]))
-            if self.run_webhook:
+            if self.payment:
+                self._refresh_order_and_payment(str(self.payment["order_id"]), str(self.payment["payment_id"]))
+            if self.run_webhook and self.payment:
                 if self.run_legacy_webhook:
                     self._simulate_doku_webhook()
                 if self.run_snap_webhook:
@@ -362,7 +393,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run DOKU production smoke test against FastAPI backend")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--email", required=True)
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--password", help="Login password; prefer --password-env to avoid process history")
+    parser.add_argument("--password-env", default="DOKU_SMOKE_USER_PASSWORD", help="Environment variable containing login password")
     parser.add_argument("--registration-id", help="Registration UUID to create payment against")
     parser.add_argument("--bank-code", default="MANDIRI")
     parser.add_argument("--mode", choices=["full", "snap-only", "legacy-only", "payment-only"], default="full", help="Execution mode")
@@ -372,23 +404,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--assert-on-failure", action="store_true", help="Exit with non-zero if result is failed or required step failed")
     parser.add_argument("--required-steps", default="", help="Comma separated step names that must be ok (example: login,doku_direct_methods,create_doku_direct_va)")
     parser.add_argument("--assert-payment-status", default="", help="Assert payment/order final status must match (supports comma or | delimiter). Example: PENDING,SUCCESS")
-    parser.add_argument("--dry-run", action="store_true", help="Only do readiness checks; do not create payment")
+    parser.add_argument("--execute-payment", action="store_true", help="Explicitly allow creation of a real sandbox payment/VA")
+    parser.add_argument("--dry-run", action="store_true", help="Deprecated alias for the default readiness-only mode")
     parser.add_argument("--output-dir", default="reports")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    password = args.password or os.getenv(args.password_env, "")
+    if not password:
+        print(f"Missing login password: set {args.password_env} or use --password", file=sys.stderr)
+        sys.exit(2)
     runner = SmokeTestRunner(
         base_url=args.base_url,
         email=args.email,
-        password=args.password,
+        password=password,
         registration_id=args.registration_id,
         bank_code=args.bank_code,
         run_webhook=args.run_webhook if args.run_webhook else args.mode in {"full", "snap-only", "legacy-only"},
         run_legacy_webhook=not args.skip_legacy_webhook and args.mode in {"full", "legacy-only"},
         run_snap_webhook=not args.skip_snap_webhook and args.mode in {"full", "snap-only"},
-        dry_run=args.dry_run,
+        dry_run=args.dry_run or not args.execute_payment,
         output_dir=args.output_dir,
     )
     if args.mode == "payment-only":
