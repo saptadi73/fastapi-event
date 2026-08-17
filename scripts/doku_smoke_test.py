@@ -37,7 +37,7 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def parse_success_payload(response: httpx.Response, allow_status: set[int] | None = None) -> tuple[dict[str, Any], bool]:
+def parse_success_payload(response: httpx.Response, allow_status: set[int] | None = None) -> tuple[Any, bool]:
     try:
         data = response.json()
     except ValueError:
@@ -46,8 +46,10 @@ def parse_success_payload(response: httpx.Response, allow_status: set[int] | Non
         allow_status = {200, 201}
     if response.status_code not in allow_status:
         return data, False
+    # API collection endpoints legitimately return a list in `data`; retaining
+    # only dictionaries made invoice discovery fail despite an HTTP 200.
     payload = data.get("data") if isinstance(data, dict) else None
-    return (payload if isinstance(payload, dict) else data), True
+    return (payload if isinstance(payload, (dict, list)) else data), True
 
 
 def generate_legacy_doku_signature(client_id: str, request_id: str, timestamp: str, target: str, body: bytes, secret: str) -> str:
