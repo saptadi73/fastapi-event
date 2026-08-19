@@ -14,7 +14,7 @@ class UserService:
         from app.modules.participants.models import ParticipantProfile
         from app.modules.payments.models import Order, Payment
         from app.modules.registrations.models import Registration
-        from app.modules.store.models import OrderItem
+        from app.modules.store.models import Cart, CartItem, OrderItem, Product
 
         user = await UserRepository.get_by_id(db, user_id)
         if not user:
@@ -68,6 +68,22 @@ class UserService:
                 "items": [{"product_id": item.product_id, "code": item.product_code, "name": item.product_name, "type": item.product_type, "quantity": item.quantity, "unit_price": item.unit_price, "line_total": item.line_total, "currency": item.currency} for item in items],
             })
 
+        cart_rows = (await db.execute(
+            select(CartItem, Product)
+            .join(Cart, Cart.id == CartItem.cart_id)
+            .join(Product, Product.id == CartItem.product_id)
+            .where(Cart.user_id == user_id, Product.is_active.is_(True))
+        )).all()
+        selected_products = [
+            {"id": product.id, "code": product.code, "name": product.name, "type": product.product_type, "quantity": item.quantity, "price": product.price, "currency": product.currency, "source": "cart"}
+            for item, product in cart_rows
+            if product.product_type in {"delegate", "exhibitor"}
+        ]
+        for order in order_data:
+            for item in order["items"]:
+                if item["type"] in {"delegate", "exhibitor"}:
+                    selected_products.append({**item, "source": "order", "order_id": order["id"], "order_status": order["status"], "payment_status": order["payment"]["status"] if order["payment"] else None})
+
         selected_types = sorted({row["type"] for row in registrations})
         delegate_rows = [row for row in registrations if row["type"] == "delegate"]
         exhibitor_rows = [row for row in registrations if row["type"] == "exhibitor"]
@@ -85,11 +101,32 @@ class UserService:
             effective_status = "payment_pending"
         if any(order["payment"] and order["payment"]["status"] == "success" for order in order_data):
             effective_status = "paid"
+        tracking = {}
+        for product_type, rows in (("delegate", delegate_rows), ("exhibitor", exhibitor_rows)):
+            products = [product for product in selected_products if product["type"] == product_type]
+            paid = any(product.get("payment_status") == "success" for product in products)
+            registered = any(row["type"] == product_type for row in registrations)
+            complete = any(
+                row["status"] in (complete_delegate_statuses if product_type == "delegate" else {"submitted", "paid", "confirmed"})
+                for row in rows
+            )
+            if complete:
+                state = "completed"
+            elif paid:
+                state = "paid_profile_incomplete"
+            elif any(product.get("order_status") == "pending" for product in products):
+                state = "payment_pending"
+            elif products or registered:
+                state = "selected"
+            else:
+                state = "not_selected"
+            tracking[product_type] = {"status": state, "products": products, "profile_required": state == "paid_profile_incomplete"}
         return {
             "user": schemas.UserRead.model_validate(user),
             "registration_status": effective_status,
             "delegate_status": delegate_status,
             "exhibitor_status": exhibitor_status,
+            "purchase_tracking": tracking,
             "selected_types": selected_types,
             "profile": schemas.UserProfileSnapshot.model_validate(participant) if participant else None,
             "registrations": registrations,

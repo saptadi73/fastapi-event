@@ -147,6 +147,10 @@ payment terbaru.
   "registration_status": "payment_pending",
   "delegate_status": "lengkap",
   "exhibitor_status": "belum_lengkap",
+  "purchase_tracking": {
+    "delegate": {"status":"paid_profile_incomplete","products":[],"profile_required":true},
+    "exhibitor": {"status":"not_selected","products":[],"profile_required":false}
+  },
   "selected_types": ["delegate", "exhibitor"],
   "profile": {},
   "registrations": [],
@@ -170,7 +174,15 @@ Status pengisian profile/registration per tipe:
 
 Field yang tersedia pada `GET /api/v1/auth/users/{user_id}` adalah
 `delegate_status` dan `exhibitor_status`. Frontend menggunakan field ini untuk
-mengarahkan user ke form yang masih belum lengkap.
+mengarahkan user ke form yang masih belum lengkap. `purchase_tracking` melacak
+product yang berada di cart atau order, termasuk status pembayaran dan kebutuhan
+profile.
+
+Status `purchase_tracking`:
+
+```text
+not_selected -> selected -> payment_pending -> paid_profile_incomplete -> completed
+```
 
 `selected_types` dapat berisi `delegate`, `exhibitor`, atau keduanya. Jangan
 menentukan status dari redirect browser; gunakan response endpoint ini setelah

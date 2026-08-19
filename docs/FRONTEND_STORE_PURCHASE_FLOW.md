@@ -23,6 +23,11 @@ Gunakan `registration_status`, `selected_types`, `registrations`, dan `orders`
 untuk menentukan langkah UI berikutnya. User hanya boleh meminta `user_id`
 miliknya sendiri; admin/organizer memiliki akses operasional.
 
+Gunakan `purchase_tracking.delegate` dan `purchase_tracking.exhibitor` untuk
+redirect setelah pemilihan atau pembayaran. Status `paid_profile_incomplete`
+berarti user wajib diarahkan ke profile tipe tersebut sebelum fitur berikutnya
+dibuka.
+
 ## State pembelian
 
 ```text
