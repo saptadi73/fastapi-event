@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
+from app.modules.payments.models import Order, OrderStatus
 from app.modules.registrations.models import Registration, RegistrationStatus
+from app.modules.store.models import OrderItem, Product
 from app.modules.users.models import User
 from .models import (AccommodationTravel, BusinessMatchingProfileSlot, BusinessMatchingSlot,
     Company, DelegatePackage, DelegateRegistrationDetail, EventActivity,
@@ -95,6 +97,22 @@ class IwbifService:
         data.update(registration_id=registration.id, company_id=company.id, terms_accepted_at=now, consent_accepted_at=now)
         db.add(DelegateRegistrationDetail(**data)); await db.flush()
         await IwbifService.replace_registration_relations(db, registration.id, payload)
+        purchased_order = (await db.execute(
+            select(Order)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .join(Product, Product.id == OrderItem.product_id)
+            .where(
+                Order.user_id == user_id,
+                Order.registration_id.is_(None),
+                Order.status.in_([OrderStatus.PENDING, OrderStatus.PAID]),
+                Product.event_id == event_id,
+                Product.code == f"DELEGATE_{package.code}",
+            )
+            .order_by(Order.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if purchased_order:
+            purchased_order.registration_id = registration.id
         await db.commit(); await db.refresh(registration)
         return registration
 

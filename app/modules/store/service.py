@@ -6,8 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.payments.models import Order, OrderStatus
-from app.modules.participants.models import ParticipantProfile
-from app.modules.registrations.models import Registration
 from app.modules.store.models import Cart, CartItem, OrderItem, Product
 
 
@@ -50,14 +48,6 @@ class StoreService:
 
     @staticmethod
     async def checkout(db: AsyncSession, user_id, event_id):
-        registration = (await db.execute(
-            select(Registration)
-            .join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id)
-            .where(Registration.event_id == event_id, ParticipantProfile.user_id == user_id)
-            .order_by(Registration.id.desc())
-        )).scalars().first()
-        if not registration:
-            raise ValidationException("REGISTRATION_REQUIRED", "User harus menyelesaikan registrasi event sebelum checkout")
         cart, rows = await StoreService.get_cart(db, user_id, event_id)
         if not rows:
             raise ValidationException("EMPTY_CART", "Cart masih kosong")
@@ -65,7 +55,7 @@ class StoreService:
         if len(currencies) != 1:
             raise ValidationException("MIXED_CURRENCY", "Product dalam satu order harus memiliki currency yang sama")
         subtotal = sum((Decimal(str(product.price)) * item.quantity for item, product in rows), Decimal("0"))
-        order = Order(user_id=user_id, registration_id=registration.id, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
+        order = Order(user_id=user_id, registration_id=None, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
         db.add(order)
         await db.flush()
         for item, product in rows:

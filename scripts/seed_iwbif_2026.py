@@ -1,9 +1,12 @@
 """Idempotent, relationally consistent demo dataset for IWBIF 2026."""
 import asyncio
 import hashlib
+import html
 import os
 import sys
+import zipfile
 from datetime import date, datetime, time, timedelta
+import re
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -34,6 +37,7 @@ from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStat
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.sessions.models import EventSession
 from app.modules.speakers.models import Speaker
+from app.modules.store.models import Product
 from app.modules.tickets.models import QRToken, Ticket, TicketStatus
 from app.modules.users.models import User
 
@@ -52,6 +56,44 @@ DELEGATES = [
     ("clara@auroradigital.sg", "Clara Tan", "Aurora Digital Commerce", "Founder", "Singapore", "Technology", "C", ["Technology Partner", "Buyer"], ["Indonesia", "Vietnam"], ["Digital Commerce", "SaaS"], ["MSME Partners", "Market Expansion"]),
     ("maria@pacificwellness.ph", "Maria Santos", "Pacific Wellness", "Managing Director", "Philippines", "Healthcare", "A", ["Distributor", "Investor"], ["Indonesia", "Malaysia"], ["Wellness", "Natural Products"], ["Distribution", "Manufacturing Partner"]),
 ]
+
+
+def extract_text_from_docx(docx_path: str | Path) -> str:
+    with zipfile.ZipFile(docx_path, "r") as zf:
+        data = zf.read("word/document.xml")
+    text = html.unescape(data.decode("utf-8"))
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def normalize_package_code(raw: str) -> str:
+    value = re.sub(r"\s+", " ", raw).strip()
+    value = re.sub(r"[^A-Z0-9_ -]", "", value.upper())
+    return re.sub(r"[\s-]+", " ", value).replace(" ", "_").strip("_")[:30] or "PACKAGE"
+
+
+def parse_delegate_packages_from_docx(docx_path: str | Path) -> list[tuple[str, str, Decimal, Decimal | None]]:
+    text = extract_text_from_docx(docx_path)
+    matches = re.finditer(
+        r"\bDELEGATE\s+PACKAGE\s+([A-Za-z0-9]+)\b(.*?)(?=\bDELEGATE\s+PACKAGE\b|$)",
+        text,
+        re.IGNORECASE,
+    )
+    packages: list[tuple[str, str, Decimal, Decimal | None]] = []
+    for match in matches:
+        raw_code = match.group(1).strip()
+        code = normalize_package_code(raw_code)
+        details = match.group(2)
+        usd_match = re.search(r"(?:USD|US\$|\$)\s*([0-9][0-9,]*(?:\.[0-9]+)?)", details, re.IGNORECASE)
+        if usd_match is None:
+            continue
+        amount = Decimal(usd_match.group(1).replace(",", ""))
+        idr_match = re.search(r"(?:IDR|Rp\.?|Rupiah)\s*([0-9][0-9.,]*)", details, re.IGNORECASE)
+        payment_amount_idr = Decimal(re.sub(r"[^0-9]", "", idr_match.group(1))) if idr_match else None
+        name = f"Delegate Package {raw_code.strip()}"
+        packages.append((code[:30], name, amount, payment_amount_idr))
+    return packages
 
 async def one(db, model, **where):
     return (await db.execute(select(model).filter_by(**where).limit(1))).scalar_one_or_none()
@@ -98,9 +140,21 @@ async def seed():
         if legacy_activity is not None and documented_activity is None:
             legacy_activity.name = "Bandung Tour"
 
-        package = {}
-        for code, name, amount, payment_amount_idr in PACKAGES:
-            package[code] = await ensure(db, DelegatePackage, event_id=event.id, code=code, defaults=dict(name=name, currency="USD", amount=amount, payment_amount_idr=payment_amount_idr, is_active=True))
+        packages_by_code = {}
+        source_docx = Path(__file__).with_name("..") / "docs" / "iwapi-iwbif_package.docx"
+        source_docx = source_docx.resolve()
+        seed_packages = parse_delegate_packages_from_docx(source_docx) if source_docx.exists() else []
+        base_packages = seed_packages or PACKAGES
+
+        fallback_idr = {code: payment_amount_idr for code, _, _, payment_amount_idr in PACKAGES}
+        for package_spec in base_packages:
+            code, name, amount, payment_amount_idr = package_spec
+            payment_amount_idr = payment_amount_idr if payment_amount_idr is not None else fallback_idr.get(code)
+            packages_by_code[code] = await ensure(db, DelegatePackage, event_id=event.id, code=code, defaults=dict(name=name, currency="USD", amount=amount, payment_amount_idr=payment_amount_idr, is_active=True))
+        for delegate_package in packages_by_code.values():
+            payable_amount = delegate_package.payment_amount_idr if delegate_package.payment_amount_idr is not None else delegate_package.amount
+            payable_currency = "IDR" if delegate_package.payment_amount_idr is not None else delegate_package.currency
+            await ensure(db, Product, event_id=event.id, code=f"DELEGATE_{delegate_package.code}", defaults=dict(name=delegate_package.name, description=f"Pembelian {delegate_package.name} untuk IWBIF 2026", product_type="delegate", price=payable_amount, currency=payable_currency, max_quantity=1, metadata_json={"delegate_package_id": str(delegate_package.id), "display_amount": str(delegate_package.amount), "display_currency": delegate_package.currency}, is_active=delegate_package.is_active))
         activity = {}
         for name in ACTIVITIES: activity[name] = await ensure(db, EventActivity, event_id=event.id, name=name, defaults=dict(is_active=True))
         profile_slots = []
@@ -117,14 +171,14 @@ async def seed():
             company_row = await ensure(db, Company, participant_id=participant.id, defaults=dict(name=company, country=country, address=f"Business District, {country}", website=f"https://{company.lower().replace(' ', '')}.example"))
             reg = await ensure(db, Registration, event_id=event.id, participant_id=participant.id, defaults=dict(registration_number=f"IWBIF26-{idx:04d}", status=RegistrationStatus.CONFIRMED, dietary_preference="Halal meal", accessibility_requirements=None, emergency_contact_name=f"Emergency Contact {idx}", emergency_contact_phone=f"+628139900{idx:04d}", consent_snapshot="terms:v1;privacy:v1;business_matching:v1", confirmed_at=at(1 + idx, 9)))
             categories = ["Delegate", "Buyer" if "Buyer" in looking else "Investor"]
-            await ensure(db, DelegateRegistrationDetail, registration_id=reg.id, defaults=dict(company_id=company_row.id, delegate_package_id=package[package_code].id, full_name=full_name, job_title=job, company_organization=company, nationality=country, title="Dr" if full_name.startswith("Dr.") else "Ms", business_sector=sector, country=country, email=email, mobile_whatsapp=user.phone, office_phone=None, company_website=f"https://{company.lower().replace(' ', '')}.example", linkedin="https://www.linkedin.com/", company_address=f"Business District, {country}", participation_categories=categories, presentation_topic=None, products_interested="Cross-border women-led products", investment_interest="Sustainable growth opportunities", room_preference="Twin Sharing", preferred_roommate=None, arrival_date=date(2026, 10, 14), departure_date=date(2026, 10, 17), flight_number=f"IW{100+idx}", airport="CGK", need_airport_pickup=True, products_services=f"Products and services from {company}", looking_for=looking, preferred_countries=preferred, business_objectives="Establish qualified partnerships and documented deal pipeline", activity_ids=activity_ids, dietary_restrictions="Halal", medical_condition=None, special_assistance=None, preferred_payment_method="Credit Card", need_official_invoice=True, tax_id=f"TAX-IWBIF-{idx:04d}", information_accuracy_confirmed=True, terms_accepted=True, business_matching_data_consent=True, terms_version="v1", consent_version="v1", terms_accepted_at=at(1, 8), consent_accepted_at=at(1, 8), submitted_at=at(1, 8, 30)))
+            await ensure(db, DelegateRegistrationDetail, registration_id=reg.id, defaults=dict(company_id=company_row.id, delegate_package_id=packages_by_code[package_code].id, full_name=full_name, job_title=job, company_organization=company, nationality=country, title="Dr" if full_name.startswith("Dr.") else "Ms", business_sector=sector, country=country, email=email, mobile_whatsapp=user.phone, office_phone=None, company_website=f"https://{company.lower().replace(' ', '')}.example", linkedin="https://www.linkedin.com/", company_address=f"Business District, {country}", participation_categories=categories, presentation_topic=None, products_interested="Cross-border women-led products", investment_interest="Sustainable growth opportunities", room_preference="Twin Sharing", preferred_roommate=None, arrival_date=date(2026, 10, 14), departure_date=date(2026, 10, 17), flight_number=f"IW{100+idx}", airport="CGK", need_airport_pickup=True, products_services=f"Products and services from {company}", looking_for=looking, preferred_countries=preferred, business_objectives="Establish qualified partnerships and documented deal pipeline", activity_ids=activity_ids, dietary_restrictions="Halal", medical_condition=None, special_assistance=None, preferred_payment_method="Credit Card", need_official_invoice=True, tax_id=f"TAX-IWBIF-{idx:04d}", information_accuracy_confirmed=True, terms_accepted=True, business_matching_data_consent=True, terms_version="v1", consent_version="v1", terms_accepted_at=at(1, 8), consent_accepted_at=at(1, 8), submitted_at=at(1, 8, 30)))
             await ensure(db, AccommodationTravel, registration_id=reg.id, defaults=dict(room_preference="Twin Sharing", preferred_roommate=None, arrival_date=date(2026, 10, 14), departure_date=date(2026, 10, 17), flight_number=f"IW{100+idx}", airport="CGK", need_airport_pickup=True))
             for category in categories: await ensure(db, RegistrationParticipationCategory, registration_id=reg.id, category=category)
             for activity_id in activity.values(): await ensure(db, RegistrationActivity, registration_id=reg.id, activity_id=activity_id.id)
             selected_slot = profile_slots[idx % len(profile_slots)]
             bm = await ensure(db, BusinessMatchingProfile, event_id=event.id, participant_id=participant.id, defaults=dict(registration_id=reg.id, company_id=company_row.id, organization_name=company, country_code={"Indonesia":"IDN","China":"CHN","Malaysia":"MYS","Singapore":"SGP","Philippines":"PHL"}[country], organization_type="Women-led Enterprise", position_title=job, short_description=f"{company} business profile for IWBIF 2026", target_market=preferred, preferred_regions=preferred, business_interests=interests, business_sectors=[sector], technology_interests=["Digital Commerce"] if sector == "Technology" else [], partnership_types=["Distribution", "Investment", "Joint Venture"], business_offerings=interests, business_needs=needs, representative=full_name, contact_email=email, contact_phone=user.phone, products=f"Products offered by {company}", services=f"Services offered by {company}", hs_code=f"HS-{idx:04d}", production_capacity="Scalable regional capacity", certificates="ISO / applicable national certification", markets_served=", ".join(preferred), preferred_slot_ids=[str(selected_slot.id)], estimated_deal_investment_value=f"USD {100000 * idx:,}", additional_notes="Available for curated meetings", profile_sharing_consent=True, profile_sharing_consent_at=at(2), available_for_matching=True, allow_messages=True, allow_meeting_requests=True))
             await ensure(db, BusinessMatchingProfileSlot, profile_id=bm.id, slot_id=selected_slot.id)
-            idr_amount = package[package_code].payment_amount_idr
+            idr_amount = packages_by_code[package_code].payment_amount_idr
             order = await ensure(db, Order, registration_id=reg.id, order_number=f"ORD-IWBIF26-{idx:04d}", defaults=dict(subtotal=idr_amount, discount_amount=0, tax_amount=0, service_fee=0, total_amount=idr_amount, currency="IDR", status=OrderStatus.PAID, expires_at=at(10)))
             va_no = f"8808{idx:012d}"
             seeded_payment = await ensure(db, Payment, order_id=order.id, defaults=dict(provider="doku", provider_transaction_id=f"DOKU-EXT-IWBIF26-{idx:04d}", provider_order_id=order.order_number, payment_type="doku_snap_va", channel_code="BCA", virtual_account_no=va_no, gross_amount=order.total_amount, currency="IDR", transaction_status=PaymentStatus.SUCCESS, fraud_status=None, raw_response='{"provider":"doku_snap_va","seed":true}', paid_at=at(3 + idx), expired_at=None, checkout_url=None))
