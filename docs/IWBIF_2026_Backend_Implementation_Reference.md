@@ -112,11 +112,13 @@ Countries in source:
 | API Field | Type | Required |
 |---|---|---:|
 | email | email/string | Yes |
-| mobile_whatsapp | string | Yes |
 | office_phone | string/null | No |
 | company_website | URL/string/null | No |
 | linkedin | URL/string/null | No |
 | company_address | text | Yes |
+
+Country dan nomor ponsel diambil dari profil akun (`users.country` dan
+`users.phone`) dan tidak dikirim ulang pada payload Delegate/Exhibitor.
 
 ## 4.3 Participation
 
@@ -282,7 +284,6 @@ Binary file sebaiknya disimpan di controlled file/object storage, sedangkan Post
 
 | API Field | Type | Required |
 |---|---|---:|
-| preferred_payment_method | enum | Yes |
 | need_official_invoice | boolean | Yes |
 | tax_id | string/null | No |
 

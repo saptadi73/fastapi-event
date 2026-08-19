@@ -59,6 +59,12 @@ async def admin_delete_payment_channel(request: Request, channel_id: uuid.UUID, 
     return success_response("Payment channel dihapus", data={"id": str(channel_id)}, request=request)
 
 
+@router.post("/admin/orders/{order_id}/confirm-manual-payment", summary="Confirm manual bank transfer payment")
+async def confirm_manual_payment(order_id: uuid.UUID, payload: schemas.ManualPaymentConfirmRequest, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    order, payment = await PaymentService.confirm_manual_payment(db, order_id, payload, admin.id)
+    return success_response("Pembayaran transfer manual berhasil dikonfirmasi", data={"order": schemas.OrderRead.model_validate(order), "payment": schemas.PaymentRead.model_validate(payment)}, request=request)
+
+
 @router.get("/payments/doku/direct/methods", summary="List configured DOKU Direct payment methods")
 async def doku_direct_methods(request: Request):
     banks = sorted(DokuSnapClient().va_channels())

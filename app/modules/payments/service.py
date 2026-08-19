@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.modules.payments import schemas
-from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, PaymentStatus, PaymentWebhookEvent
+from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
@@ -22,6 +22,49 @@ from app.modules.registrations.models import Registration, RegistrationStatus
 
 
 class PaymentService:
+    @staticmethod
+    async def confirm_manual_payment(session: AsyncSession, order_id: uuid.UUID, payload: schemas.ManualPaymentConfirmRequest, admin_user_id: uuid.UUID) -> tuple[Order, Payment]:
+        order = await session.get(Order, order_id, with_for_update=True)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan")
+        manual_payment = (await session.execute(
+            select(Payment)
+            .where(Payment.order_id == order.id, Payment.provider.in_(["manual_transfer", "manual_qr_code"]))
+            .order_by(Payment.created_at.desc())
+            .with_for_update()
+        )).scalars().first()
+        if order.status == OrderStatus.PAID:
+            if manual_payment:
+                return order, manual_payment
+            raise ConflictException("ORDER_ALREADY_PAID", "Order sudah dibayar melalui metode lain")
+        if order.status in {OrderStatus.CANCELED, OrderStatus.EXPIRED}:
+            raise ConflictException("ORDER_NOT_PAYABLE", "Order dibatalkan atau kedaluwarsa tidak dapat dikonfirmasi")
+
+        paid_at = payload.paid_at or datetime.now(timezone.utc)
+        confirmation = {"confirmed_by": str(admin_user_id), "payment_method": payload.payment_method, "payment_reference": payload.transfer_reference, "notes": payload.notes, "confirmed_at": paid_at.isoformat()}
+        if manual_payment is None:
+            manual_payment = Payment(order_id=order.id, provider=payload.payment_method, gross_amount=order.total_amount, currency=order.currency)
+            session.add(manual_payment)
+        manual_payment.provider = payload.payment_method
+        manual_payment.provider_transaction_id = payload.transfer_reference
+        manual_payment.provider_order_id = order.order_number
+        manual_payment.provider_reference_no = payload.transfer_reference
+        manual_payment.payment_type = "qrcode" if payload.payment_method == "manual_qr_code" else "bank_transfer"
+        manual_payment.channel_code = "MANUAL_QR_CODE" if payload.payment_method == "manual_qr_code" else "MANUAL_TRANSFER"
+        manual_payment.transaction_status = PaymentStatus.SUCCESS
+        manual_payment.paid_at = paid_at
+        manual_payment.raw_response = json.dumps(confirmation)
+        order.status = OrderStatus.PAID
+        if order.registration_id:
+            registration = await session.get(Registration, order.registration_id, with_for_update=True)
+            if registration and registration.status != RegistrationStatus.CONFIRMED:
+                registration.status = RegistrationStatus.PAID
+        await session.flush()
+        session.add(PaymentWebhookEvent(payment_id=manual_payment.id, provider=payload.payment_method, request_id=f"manual-{uuid.uuid4().hex}", event_status="SUCCESS", payload=confirmation))
+        await session.commit()
+        await session.refresh(manual_payment)
+        return order, manual_payment
+
     @staticmethod
     async def create_doku_qris(session: AsyncSession, payload: schemas.CreateDokuQrisRequest, user_id: uuid.UUID) -> schemas.DokuQrisResponse:
         registrations = await PaymentRepository.get_registrations_for_user(session, user_id)

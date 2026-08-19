@@ -15,9 +15,7 @@ class DelegateRegistrationWrite(BaseModel):
     nationality: str = Field(min_length=1, max_length=100)
     title: str
     business_sector: str
-    country: str
     email: str
-    mobile_whatsapp: str = Field(min_length=5, max_length=60)
     office_phone: str | None = None
     company_website: HttpUrl | None = None
     linkedin: HttpUrl | None = None
@@ -41,7 +39,6 @@ class DelegateRegistrationWrite(BaseModel):
     dietary_restrictions: str | None = None
     medical_condition: str | None = None
     special_assistance: str | None = None
-    preferred_payment_method: str
     need_official_invoice: bool
     tax_id: str | None = None
     information_accuracy_confirmed: bool
@@ -53,7 +50,7 @@ class DelegateRegistrationWrite(BaseModel):
     @model_validator(mode="after")
     def validate_source_rules(self):
         if "@" not in self.email or self.email.startswith("@") or self.email.endswith("@"): raise ValueError("Invalid email")
-        allowed = [(self.business_sector, BUSINESS_SECTORS, "business_sector"), (self.country, COUNTRIES, "country"), (self.room_preference, ROOM_PREFERENCES, "room_preference"), (self.airport, AIRPORTS, "airport"), (self.preferred_payment_method, PAYMENT_METHODS, "preferred_payment_method")]
+        allowed = [(self.business_sector, BUSINESS_SECTORS, "business_sector"), (self.room_preference, ROOM_PREFERENCES, "room_preference"), (self.airport, AIRPORTS, "airport")]
         for value, choices, name in allowed:
             if value not in choices: raise ValueError(f"Invalid {name}")
         for values, choices, name in [(self.participation_categories, PARTICIPATION_CATEGORIES, "participation_categories"), (self.looking_for, LOOKING_FOR, "looking_for"), (self.preferred_countries, PREFERRED_COUNTRIES, "preferred_countries")]:
@@ -112,14 +109,14 @@ class SlotWrite(BaseModel):
 
 class ExhibitorWrite(BaseModel):
     participant_id: UUID | None = None
-    company_name: str = Field(min_length=1); country: str; brand: str = Field(min_length=1); contact_person: str = Field(min_length=1)
-    email: str; phone: str = Field(min_length=5); products_to_display: str = Field(min_length=1)
+    company_name: str = Field(min_length=1); brand: str = Field(min_length=1); contact_person: str = Field(min_length=1)
+    email: str; products_to_display: str = Field(min_length=1)
     booth_size_requested: str; electricity_requirement: str = Field(min_length=1); special_requirement: str = Field(min_length=1)
     exhibition_terms_accepted: bool; exhibition_terms_version: str = Field(min_length=1)
     @model_validator(mode="after")
     def validate_values(self):
         if "@" not in self.email or self.email.startswith("@") or self.email.endswith("@"): raise ValueError("Invalid email")
-        if self.country not in COUNTRIES or self.booth_size_requested not in BOOTH_SIZES: raise ValueError("Invalid country or booth size")
+        if self.booth_size_requested not in BOOTH_SIZES: raise ValueError("Invalid booth size")
         if not self.exhibition_terms_accepted: raise ValueError("Exhibition terms must be accepted")
         return self
 

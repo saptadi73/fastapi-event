@@ -5,5 +5,4 @@ LOOKING_FOR = ["Buyer", "Distributor", "Importer", "Retailer", "Investor", "Tech
 PREFERRED_COUNTRIES = ["Indonesia", "Malaysia", "China", "Singapore", "Thailand", "Vietnam", "Cambodia", "Philippines", "Others"]
 ROOM_PREFERENCES = ["Twin Sharing", "Single Room (+Supplement)"]
 AIRPORTS = ["CGK", "HLP", "Other"]
-PAYMENT_METHODS = ["Bank Transfer", "Credit Card", "Invoice", "Pay Later"]
 BOOTH_SIZES = ["Standard Booth 3x3", "Premium Booth", "Custom Booth"]

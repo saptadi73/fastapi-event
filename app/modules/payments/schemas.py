@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,6 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
     order_id: UUID | None = None
+
+
+class ManualPaymentConfirmRequest(BaseModel):
+    payment_method: Literal["manual_transfer", "manual_qr_code"] = "manual_transfer"
+    transfer_reference: str = Field(min_length=3, max_length=128)
+    notes: str | None = Field(default=None, max_length=1000)
+    paid_at: datetime | None = None
 
 
 class PaymentChannelWrite(BaseModel):
@@ -39,7 +47,7 @@ class PublicPaymentMethodRead(BaseModel):
 
 
 class CreateDokuDirectVARequest(BaseModel):
-    registration_id: UUID
+    registration_id: UUID | None
     bank_code: str
 
 
@@ -117,7 +125,7 @@ class OrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    registration_id: UUID
+    registration_id: UUID | None
     order_number: str
     subtotal: float
     discount_amount: float

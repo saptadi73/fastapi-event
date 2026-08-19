@@ -29,7 +29,7 @@ async def countries(request: Request): return success_response("Master countries
 
 @router.get("/master/iwbif-options")
 async def options(request: Request):
-    return success_response("Master IWBIF options", {"participation_categories": PARTICIPATION_CATEGORIES, "looking_for": LOOKING_FOR, "preferred_countries": PREFERRED_COUNTRIES, "room_preferences": ROOM_PREFERENCES, "airports": AIRPORTS, "payment_methods": PAYMENT_METHODS, "booth_sizes": BOOTH_SIZES}, request=request)
+    return success_response("Master IWBIF options", {"participation_categories": PARTICIPATION_CATEGORIES, "looking_for": LOOKING_FOR, "preferred_countries": PREFERRED_COUNTRIES, "room_preferences": ROOM_PREFERENCES, "airports": AIRPORTS, "booth_sizes": BOOTH_SIZES}, request=request)
 
 @router.get("/events/{event_id}/delegate-packages")
 async def packages(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
@@ -154,7 +154,7 @@ async def update_exhibitor(event_id: UUID, exhibitor_id: UUID, payload: schemas.
     if row.status != "draft": raise ConflictException("EXHIBITOR_NOT_EDITABLE", "Hanya draft exhibitor yang dapat diubah")
     if payload.participant_id and payload.participant_id != row.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
     data = payload.model_dump(exclude={"participant_id"}); data["email"] = str(data["email"])
-    company = await IwbifService.upsert_company(db, row.participant_id, name=payload.company_name, country=payload.country)
+    company = await IwbifService.upsert_company(db, row.participant_id, name=payload.company_name, country=await IwbifService.account_country(db, user.id))
     row.company_id = company.id
     for key, value in data.items(): setattr(row, key, value)
     row.exhibition_terms_accepted_at = datetime.now(timezone.utc); await db.commit(); await db.refresh(row); return success_response("Exhibitor berhasil diperbarui", schemas.ExhibitorRead.model_validate(row), request=request)

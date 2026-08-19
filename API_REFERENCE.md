@@ -232,8 +232,7 @@ GET /api/v1/events/{event_id}/business-matching-slots
 ```
 
 Jangan hard-code pilihan. `iwbif-options` memuat participation categories,
-looking-for, preferred countries, room preferences, airports, payment methods,
-dan booth sizes.
+looking-for, preferred countries, room preferences, airports, dan booth sizes.
 
 Package response:
 
@@ -242,6 +241,9 @@ Package response:
 ```
 
 `amount/currency` untuk display; `payment_amount_idr` untuk charge DOKU.
+
+Untuk pembelian awal Delegate, gunakan katalog store pada bagian 6. Endpoint
+`delegate-packages` adalah master form registration dan bukan endpoint cart.
 
 ## 4. Participant profile
 
@@ -296,6 +298,12 @@ draft → submitted → under_verification → verified/payment_pending
 - Satu participant hanya boleh punya satu registrasi aktif per event.
 - Business Matching IWBIF baru tersedia setelah `confirmed`.
 
+Untuk alur beli package lebih dulu, lakukan cart, checkout, dan pembayaran
+sebelum membuat draft registration. Setelah payment, frontend mengirim form
+Delegate lengkap dengan `delegate_package_id` dari metadata product yang dibeli.
+Backend otomatis menautkan order Delegate cocok milik user ke registration.
+Frontend tidak mengirim `order_id` pada payload registration.
+
 Create/update — **Auth**:
 
 ```http
@@ -308,8 +316,8 @@ PATCH /api/v1/events/{event_id}/registrations/{registration_id}
   "delegate_package_id":"uuid","full_name":"Delegate Name",
   "job_title":"Director","company_organization":"Example Company",
   "nationality":"Indonesian","title":"Ms.","business_sector":"Technology",
-  "country":"Indonesia","email":"delegate@example.com","mobile_whatsapp":"+628123456789",
-  "office_phone":null,"company_website":"https://example.com","linkedin":null,
+  "email":"delegate@example.com","office_phone":null,
+  "company_website":"https://example.com","linkedin":null,
   "company_address":"Jakarta","participation_categories":["Delegate","Buyer"],
   "presentation_topic":null,"products_interested":"Digital commerce",
   "investment_interest":"Regional expansion","room_preference":"Twin Sharing",
@@ -318,8 +326,7 @@ PATCH /api/v1/events/{event_id}/registrations/{registration_id}
   "products_services":"Commerce platform","looking_for":["Buyer","Investor"],
   "preferred_countries":["Indonesia","Malaysia"],"business_objectives":"Find partners",
   "activity_ids":["uuid"],"dietary_restrictions":null,"medical_condition":null,
-  "special_assistance":null,"preferred_payment_method":"Bank Transfer",
-  "need_official_invoice":true,"tax_id":"NPWP-or-tax-id",
+  "special_assistance":null,"need_official_invoice":true,"tax_id":"NPWP-or-tax-id",
   "information_accuracy_confirmed":true,"terms_accepted":true,
   "business_matching_data_consent":true,"terms_version":"2026-01","consent_version":"2026-01"
 }
@@ -377,10 +384,24 @@ POST /api/v1/payments/doku/checkout
 {"order_id":"order-uuid"}
 ```
 
-User harus sudah memiliki registration untuk event sebelum checkout. Order cart
-selalu menyimpan `user_id` dan `registration_id`; ownership keduanya diverifikasi
-backend. Disable tombol selama request, simpan ID response, dan jangan membuat
-order baru saat halaman hasil di-refresh. Detail ada di
+Checkout cart tidak memerlukan registration. Order baru selalu menyimpan
+`user_id`; `registration_id` dapat kosong sampai form Delegate selesai dibuat.
+Untuk product `delegate`, metadata berisi:
+
+```json
+{
+  "delegate_package_id":"package-uuid",
+  "display_amount":"500",
+  "display_currency":"USD"
+}
+```
+
+`price/currency` product adalah nominal pembayaran yang dipakai checkout (saat
+ini IDR). `display_amount/display_currency` hanya untuk tampilan harga sumber.
+Setelah payment, gunakan `delegate_package_id` metadata saat membuat registration
+Delegate; backend akan menautkan order pending atau paid yang cocok. Disable
+tombol selama request, simpan ID response, dan jangan membuat order baru saat
+halaman hasil di-refresh. Detail ada di
 `docs/FRONTEND_STORE_PURCHASE_FLOW.md`.
 
 Admin mengelola product:
@@ -420,9 +441,9 @@ Payload create/update — **Auth**:
 
 ```json
 {
-  "company_name":"Example SME","country":"Indonesia",
+  "company_name":"Example SME",
   "brand":"Example Brand","contact_person":"Contact Name","email":"contact@example.com",
-  "phone":"+628123456789","products_to_display":"Food products",
+  "products_to_display":"Food products",
   "booth_size_requested":"Standard Booth 3x3","electricity_requirement":"220V, 500W",
   "special_requirement":"None","exhibition_terms_accepted":true,
   "exhibition_terms_version":"2026-01"
@@ -442,6 +463,17 @@ Create menghasilkan draft. Upload catalogue (`file`, max 10 MB) mengubah status
 menjadi submitted. List event hanya menampilkan submitted. Update/delete hanya
 draft milik user. Satu akun hanya dapat membuat satu exhibitor per event;
 ownership selalu berasal dari access token.
+
+Country dan nomor telepon tidak dikirim pada payload Delegate maupun Exhibitor.
+Country company diambil dari `users.country`; nomor telepon tetap menjadi data
+akun `users.phone` dan tidak diduplikasi pada tabel registrasi.
+Metode pembayaran juga tidak diisi pada form Delegate/Exhibitor; pemilihan kanal
+dilakukan pada tahap checkout atau payment DOKU.
+
+Endpoint `GET /api/v1/events/{event_id}/exhibitors` adalah daftar exhibitor yang
+sudah submitted, bukan katalog paket Exhibitor. Backend belum menyediakan master
+package/harga atau checkout Exhibitor; jangan tampilkan endpoint ini sebagai
+pilihan pembelian sampai organizer mendefinisikan package tersebut.
 
 ## 9. Business Matching profile dan discovery
 
@@ -892,7 +924,29 @@ GET  /api/v1/admin/events/{event_id}/registrations
 POST /api/v1/admin/registrations/{registration_id}/verify
 POST /api/v1/admin/registrations/{registration_id}/confirm
 POST /api/v1/admin/registrations/{registration_id}/reject
+POST /api/v1/admin/orders/{order_id}/confirm-manual-payment
 ```
+
+Konfirmasi transfer manual memerlukan role `admin` atau `organizer`:
+
+```http
+POST /api/v1/admin/orders/{order_id}/confirm-manual-payment
+Authorization: Bearer <admin_access_token>
+Content-Type: application/json
+```
+
+```json
+{"payment_method":"manual_transfer","transfer_reference":"BCA-20260819-001","notes":"Mutasi bank telah diverifikasi"}
+```
+
+Backend memakai nominal yang tersimpan pada order, membuat payment
+`manual_transfer` atau `manual_qr_code`, dan mengubah status order menjadi
+`paid`. Jika order sudah terhubung ke registration, status registration juga
+menjadi `paid`. Endpoint ini idempoten untuk konfirmasi manual yang sama dan
+menolak order canceled/expired atau order yang sudah dibayar melalui gateway
+lain. Untuk QR direct yang tidak melalui DOKU, kirim
+`"payment_method":"manual_qr_code"` dan isi `transfer_reference` dengan
+referensi transaksi QR.
 
 Path item literal untuk GET/PUT/DELETE:
 
@@ -947,6 +1001,11 @@ GET /api/v1/health/readiness
 ```
 
 Alur utama:
+
+Untuk Delegate yang membeli package lebih dulu, urutannya adalah event/store
+catalog, cart, checkout, DOKU payment, lalu Delegate registration draft. Alur
+registration-first tetap tersedia untuk kompatibilitas, tetapi checkout store
+tidak lagi mewajibkan registration.
 
 ```text
 register/login → auth/me → participants/me → event/master → registration draft

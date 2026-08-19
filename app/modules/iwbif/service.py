@@ -25,6 +25,13 @@ MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
 
 class IwbifService:
     @staticmethod
+    async def account_country(db, user_id) -> str:
+        user = await db.get(User, user_id)
+        if not user or not user.country:
+            raise ValidationException("USER_COUNTRY_REQUIRED", "Country akun wajib diisi sebelum registrasi")
+        return user.country
+
+    @staticmethod
     async def resolve_participant(db, user_id, participant_id=None, *, full_name=None, organization_name=None):
         row = (await db.execute(select(ParticipantProfile).where(ParticipantProfile.user_id == user_id))).scalar_one_or_none()
         if row and participant_id and row.id != participant_id:
@@ -88,7 +95,7 @@ class IwbifService:
         if existing: raise ConflictException("REGISTRATION_EXISTS", "Peserta sudah memiliki registrasi aktif")
         registration = Registration(event_id=event_id, participant_id=participant.id, registration_number=f"IWBIF-{uuid.uuid4().hex[:10].upper()}", status=RegistrationStatus.DRAFT)
         db.add(registration); await db.flush()
-        company = await IwbifService.upsert_company(db, participant.id, name=payload.company_organization, country=payload.country, address=payload.company_address, website=payload.company_website)
+        company = await IwbifService.upsert_company(db, participant.id, name=payload.company_organization, country=await IwbifService.account_country(db, user_id), address=payload.company_address, website=payload.company_website)
         data = payload.model_dump(exclude={"participant_id"})
         data["company_website"] = str(data["company_website"]) if data["company_website"] else None
         data["linkedin"] = str(data["linkedin"]) if data["linkedin"] else None
@@ -167,7 +174,7 @@ class IwbifService:
         valid_activities = set((await db.execute(select(EventActivity.id).where(EventActivity.event_id == reg.event_id, EventActivity.is_active.is_(True), EventActivity.id.in_(payload.activity_ids)))).scalars())
         if valid_activities != set(payload.activity_ids): raise ValidationException("INVALID_ACTIVITY", "Aktivitas event tidak valid")
         detail = await db.get(DelegateRegistrationDetail, reg.id)
-        company = await IwbifService.upsert_company(db, reg.participant_id, name=payload.company_organization, country=payload.country, address=payload.company_address, website=payload.company_website)
+        company = await IwbifService.upsert_company(db, reg.participant_id, name=payload.company_organization, country=await IwbifService.account_country(db, user_id), address=payload.company_address, website=payload.company_website)
         data = payload.model_dump(exclude={"participant_id"})
         data["company_website"] = str(data["company_website"]) if data["company_website"] else None; data["linkedin"] = str(data["linkedin"]) if data["linkedin"] else None; data["activity_ids"] = [str(x) for x in data["activity_ids"]]
         data["company_id"] = company.id
@@ -181,7 +188,7 @@ class IwbifService:
         if not await db.get(Event, event_id): raise NotFoundException("EVENT_NOT_FOUND", "Event tidak ditemukan")
         existing = (await db.execute(select(ExhibitorRegistration.id).where(ExhibitorRegistration.event_id == event_id, ExhibitorRegistration.participant_id == participant.id))).first()
         if existing: raise ConflictException("EXHIBITOR_EXISTS", "User sudah memiliki registrasi exhibitor untuk event ini")
-        company = await IwbifService.upsert_company(db, participant.id, name=payload.company_name, country=payload.country)
+        company = await IwbifService.upsert_company(db, participant.id, name=payload.company_name, country=await IwbifService.account_country(db, user_id))
         data = payload.model_dump(exclude={"participant_id"}); data["email"] = str(data["email"]); data.update(event_id=event_id, participant_id=participant.id, company_id=company.id, exhibition_terms_accepted_at=datetime.now(timezone.utc))
         row = ExhibitorRegistration(**data); db.add(row); await db.commit(); await db.refresh(row); return row
 
