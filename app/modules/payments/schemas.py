@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
+    order_id: UUID | None = None
 
 
 class PaymentChannelWrite(BaseModel):

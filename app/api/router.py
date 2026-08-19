@@ -12,6 +12,7 @@ from app.modules.tickets import routes as ticket_routes
 from app.modules.registrations import routes as registration_routes
 from app.modules.business_matching import routes as business_matching_routes
 from app.modules.iwbif import routes as iwbif_routes
+from app.modules.store import routes as store_routes
 
 router = APIRouter()
 
@@ -27,3 +28,4 @@ router.include_router(ticket_routes.router)
 router.include_router(registration_routes.router, tags=["registrations"])
 router.include_router(business_matching_routes.router, tags=["business-matching"])
 router.include_router(iwbif_routes.router, tags=["iwbif-2026"])
+router.include_router(store_routes.router)

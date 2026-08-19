@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db_session
@@ -7,6 +7,7 @@ from app.modules.users import schemas as user_schemas
 from app.modules.identity import schemas
 from app.modules.users.service import UserService
 from app.support.responses import success_response
+from app.core.email import send_registration_confirmation
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -21,6 +22,19 @@ async def me(
         data={"user": user_schemas.UserRead.model_validate(current_user)},
         request=request,
     )
+
+
+@router.get("/users/{user_id}", summary="Get complete user registration detail")
+async def user_detail(
+    request: Request,
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if str(current_user.id) != user_id and current_user.role not in {"admin", "organizer"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User detail hanya dapat dilihat oleh pemilik atau organizer")
+    data = await UserService.get_registration_detail(db, user_id)
+    return success_response("Detail user dan registrasi berhasil diambil", data=data, request=request)
 
 
 @router.put("/me", summary="Update current user")
@@ -41,10 +55,12 @@ async def update_me(
 @router.post("/register", summary="Register account")
 async def register(
     request: Request,
+    background_tasks: BackgroundTasks,
     payload: user_schemas.UserCreate,
     db: AsyncSession = Depends(get_db_session),
 ):
     user, access_token, refresh_token = await UserService.register(db, payload)
+    background_tasks.add_task(send_registration_confirmation, user.email)
     return success_response(
         "Registrasi akun berhasil",
         data={

@@ -67,7 +67,16 @@ class PaymentRepository:
         # the fixed amount charged by Indonesian payment rails.
         subtotal = package_row.payment_amount_idr if package_row.payment_amount_idr is not None else package_row.amount
         currency = "IDR" if package_row.payment_amount_idr is not None else package_row.currency
+        from app.modules.participants.models import ParticipantProfile
+        registration_owner = (await session.execute(
+            select(ParticipantProfile.user_id)
+            .join(Registration, Registration.participant_id == ParticipantProfile.id)
+            .where(Registration.id == registration_id)
+        )).scalar_one_or_none()
+        if not registration_owner:
+            raise ValidationException("REGISTRATION_OWNER_NOT_FOUND", "Pemilik registrasi tidak ditemukan")
         order = Order(
+            user_id=registration_owner,
             registration_id=registration_id,
             order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
             subtotal=subtotal,
@@ -120,12 +129,12 @@ class PaymentRepository:
 
     @staticmethod
     async def get_payment_for_user(session: AsyncSession, payment_id: uuid.UUID, user_id: uuid.UUID) -> Payment | None:
-        stmt = (select(Payment).join(Order, Payment.order_id == Order.id).join(Registration, Order.registration_id == Registration.id).join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Payment.id == payment_id, ParticipantProfile.user_id == user_id))
+        stmt = (select(Payment).join(Order, Payment.order_id == Order.id).outerjoin(Registration, Order.registration_id == Registration.id).outerjoin(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Payment.id == payment_id, (Order.user_id == user_id) | (ParticipantProfile.user_id == user_id)))
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def get_order_for_user(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID) -> Order | None:
-        stmt = (select(Order).join(Registration, Order.registration_id == Registration.id).join(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Order.id == order_id, ParticipantProfile.user_id == user_id))
+        stmt = (select(Order).outerjoin(Registration, Order.registration_id == Registration.id).outerjoin(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Order.id == order_id, (Order.user_id == user_id) | (ParticipantProfile.user_id == user_id)))
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod

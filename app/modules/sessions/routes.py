@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_db_session
+from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.modules.sessions import schemas
 from app.modules.sessions.service import SessionService
 from app.support.responses import success_response
@@ -37,7 +37,7 @@ async def create_session(
     request: Request,
     payload: schemas.SessionCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    admin=Depends(require_admin),
 ):
     data = await SessionService.create(db, payload)
     return success_response("Session berhasil dibuat", data=data, request=request)
@@ -49,8 +49,7 @@ async def update_session(
     session_id: UUID,
     payload: schemas.SessionUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    admin=Depends(require_admin),
 ):
     data = await SessionService.update(db, session_id, payload)
     return success_response("Session berhasil diubah", data=data, request=request)
-

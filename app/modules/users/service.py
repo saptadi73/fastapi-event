@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.exceptions import ValidationException
 from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
@@ -8,13 +9,101 @@ from app.modules.users.repository import UserRepository
 
 class UserService:
     @staticmethod
+    async def get_registration_detail(db: AsyncSession, user_id):
+        from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail, ExhibitorRegistration
+        from app.modules.participants.models import ParticipantProfile
+        from app.modules.payments.models import Order, Payment
+        from app.modules.registrations.models import Registration
+        from app.modules.store.models import OrderItem
+
+        user = await UserRepository.get_by_id(db, user_id)
+        if not user:
+            raise ValidationException("USER_NOT_FOUND", "User tidak ditemukan")
+
+        participant = (await db.execute(select(ParticipantProfile).where(ParticipantProfile.user_id == user_id))).scalar_one_or_none()
+        registrations = []
+        if participant:
+            delegate_rows = (await db.execute(
+                select(Registration, DelegateRegistrationDetail, DelegatePackage)
+                .outerjoin(DelegateRegistrationDetail, DelegateRegistrationDetail.registration_id == Registration.id)
+                .outerjoin(DelegatePackage, DelegatePackage.id == DelegateRegistrationDetail.delegate_package_id)
+                .where(Registration.participant_id == participant.id)
+                .order_by(Registration.id.desc())
+            )).all()
+            for registration, detail, package in delegate_rows:
+                registrations.append({
+                    "id": registration.id,
+                    "type": "delegate",
+                    "event_id": registration.event_id,
+                    "status": getattr(registration.status, "value", registration.status),
+                    "registration_number": registration.registration_number,
+                    "package": {"id": package.id, "code": package.code, "name": package.name, "amount": package.amount, "currency": package.currency} if package else None,
+                })
+
+            exhibitor_rows = (await db.execute(select(ExhibitorRegistration).where(ExhibitorRegistration.participant_id == participant.id).order_by(ExhibitorRegistration.id.desc()))).scalars().all()
+            registrations.extend({
+                "id": row.id,
+                "type": "exhibitor",
+                "event_id": row.event_id,
+                "status": row.status,
+                "registration_number": None,
+                "package": None,
+            } for row in exhibitor_rows)
+
+        orders = (await db.execute(select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()))).scalars().all()
+        order_data = []
+        for order in orders:
+            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+            payment = (await db.execute(select(Payment).where(Payment.order_id == order.id).order_by(Payment.created_at.desc()))).scalars().first()
+            order_data.append({
+                "id": order.id,
+                "order_number": order.order_number,
+                "registration_id": order.registration_id,
+                "status": order.status,
+                "subtotal": order.subtotal,
+                "total_amount": order.total_amount,
+                "currency": order.currency,
+                "created_at": order.created_at,
+                "payment": {"id": payment.id, "status": payment.transaction_status, "provider": payment.provider, "paid_at": payment.paid_at} if payment else None,
+                "items": [{"product_id": item.product_id, "code": item.product_code, "name": item.product_name, "type": item.product_type, "quantity": item.quantity, "unit_price": item.unit_price, "line_total": item.line_total, "currency": item.currency} for item in items],
+            })
+
+        selected_types = sorted({row["type"] for row in registrations})
+        delegate_rows = [row for row in registrations if row["type"] == "delegate"]
+        exhibitor_rows = [row for row in registrations if row["type"] == "exhibitor"]
+        complete_delegate_statuses = {"submitted", "under_verification", "verified", "payment_pending", "paid", "confirmed"}
+        delegate_status = "belum_terdaftar"
+        exhibitor_status = "belum_terdaftar"
+        if delegate_rows:
+            delegate_status = "lengkap" if any(row["status"] in complete_delegate_statuses for row in delegate_rows) else "belum_lengkap"
+        if exhibitor_rows:
+            exhibitor_status = "lengkap" if any(row["status"] in {"submitted", "paid", "confirmed"} for row in exhibitor_rows) else "belum_lengkap"
+        effective_status = user.registration_status
+        if selected_types:
+            effective_status = "package_selected"
+        if any(order["status"] == "pending" for order in order_data):
+            effective_status = "payment_pending"
+        if any(order["payment"] and order["payment"]["status"] == "success" for order in order_data):
+            effective_status = "paid"
+        return {
+            "user": schemas.UserRead.model_validate(user),
+            "registration_status": effective_status,
+            "delegate_status": delegate_status,
+            "exhibitor_status": exhibitor_status,
+            "selected_types": selected_types,
+            "profile": schemas.UserProfileSnapshot.model_validate(participant) if participant else None,
+            "registrations": registrations,
+            "orders": order_data,
+        }
+    @staticmethod
     async def register(db: AsyncSession, payload: schemas.UserCreate) -> tuple[schemas.UserRead, str, str]:
         password_hash = hash_password(payload.password)
         user = await UserRepository.create(
             session=db,
             email=payload.email,
             password_hash=password_hash,
-            full_name=payload.full_name,
+            country=payload.country,
+            phone=payload.phone,
         )
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))

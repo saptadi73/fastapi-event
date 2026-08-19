@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router
 from app.core.config import get_settings
@@ -20,6 +21,21 @@ def create_app() -> FastAPI:
         debug=settings.APP_DEBUG,
         version="1.0.0",
     )
+
+    if settings.CORS_ENABLED:
+        allowed_origins = [
+            origin.strip()
+            for origin in settings.FRONTEND_URL.split(",")
+            if origin.strip()
+        ]
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins or ["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     add_exception_handlers(app)
 

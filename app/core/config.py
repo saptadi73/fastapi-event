@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     APP_DEBUG: bool = False
     API_PREFIX: str = "/api/v1"
+    CORS_ENABLED: bool = True
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/event_portal"
     APP_SECRET_KEY: str = "change_me"
@@ -23,6 +24,15 @@ class Settings(BaseSettings):
 
     PROJECT_TIMEZONE: str = "Asia/Jakarta"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    EMAIL_ENABLED: bool = False
+    EMAIL_SMTP_HOST: str = "smtp.gmail.com"
+    EMAIL_SMTP_PORT: int = 587
+    EMAIL_SMTP_USE_TLS: bool = True
+    EMAIL_SMTP_USERNAME: str = "events@kupu-gsc.co.id"
+    EMAIL_SMTP_PASSWORD: str = ""
+    EMAIL_FROM_ADDRESS: str = "events@kupu-gsc.co.id"
+    EMAIL_FROM_NAME: str = "IWBIF 2026"
+    FRONTEND_LOGIN_URL: str = "http://localhost:3000/login"
 
     DOKU_CLIENT_ID: str = ""
     DOKU_SECRET_KEY: str = ""

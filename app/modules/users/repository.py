@@ -8,13 +8,13 @@ from app.modules.users.models import User
 
 class UserRepository:
     @staticmethod
-    async def create(session: AsyncSession, email: str, password_hash: str, full_name: str, phone: str | None = None) -> User:
+    async def create(session: AsyncSession, email: str, password_hash: str, country: str, phone: str) -> User:
         stmt = select(User).where(User.email == email.lower())
         result = await session.execute(stmt)
         if result.scalar_one_or_none():
             raise ConflictException(code="USER_EXISTS", message="Email sudah terdaftar")
 
-        user = User(email=email.lower(), password_hash=password_hash, full_name=full_name, phone=phone)
+        user = User(email=email.lower(), password_hash=password_hash, country=country, phone=phone)
         session.add(user)
         await session.commit()
         await session.refresh(user)

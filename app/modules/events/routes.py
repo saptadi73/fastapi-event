@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db_session
+from app.core.dependencies import get_db_session, require_admin
 from app.support.responses import success_response
 from app.modules.sessions import schemas as session_schemas
 from app.modules.sessions.service import SessionService
@@ -64,6 +64,7 @@ async def create_event(
     request: Request,
     payload: schemas.EventCreate,
     db: AsyncSession = Depends(get_db_session),
+    admin=Depends(require_admin),
 ):
     event = await EventService.create(db, payload)
     return success_response("Event berhasil dibuat", data=schemas.EventRead.model_validate(event), request=request)
@@ -75,6 +76,7 @@ async def update_event(
     event_id,
     payload: schemas.EventUpdate,
     db: AsyncSession = Depends(get_db_session),
+    admin=Depends(require_admin),
 ):
     event = await EventService.update(db, event_id, payload)
     return success_response("Event berhasil diperbarui", data=schemas.EventRead.model_validate(event), request=request)

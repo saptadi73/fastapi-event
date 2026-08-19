@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_db_session
+from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.support.responses import success_response
 from app.modules.speakers import schemas
 from app.modules.speakers.service import SpeakerService
@@ -36,7 +36,7 @@ async def create_speaker(
     request: Request,
     payload: schemas.SpeakerCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    admin=Depends(require_admin),
 ):
     speaker = await SpeakerService.create(db, payload)
     return success_response("Speaker berhasil dibuat", data=speaker, request=request)
@@ -48,7 +48,7 @@ async def update_speaker(
     speaker_id,
     payload: schemas.SpeakerUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    admin=Depends(require_admin),
 ):
     speaker = await SpeakerService.update(db, speaker_id, payload)
     return success_response("Speaker berhasil diubah", data=speaker, request=request)
@@ -60,7 +60,7 @@ async def upload_speaker_photo(
     speaker_id,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    admin=Depends(require_admin),
 ):
     from app.core.uploads import save_profile_photo
 

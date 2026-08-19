@@ -71,6 +71,10 @@ menandai transaksi sukses.
 
 ## DOKU Checkout lama (fallback)
 
+Untuk pembelian product baru berbasis cart, gunakan alur lengkap pada
+`FRONTEND_STORE_PURCHASE_FLOW.md` dan kirim `order_id`, bukan `registration_id`.
+Endpoint berbasis registration tetap tersedia untuk kompatibilitas alur lama.
+
 Dokumen ini adalah kontrak integrasi frontend untuk pembayaran IWBIF 2026.
 OpenAPI backend tersedia di `/openapi.json`, sedangkan seluruh endpoint aplikasi
 menggunakan prefix `/api/v1`.

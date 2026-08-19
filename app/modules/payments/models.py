@@ -28,6 +28,7 @@ class Order(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id"), nullable=False)
     order_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)

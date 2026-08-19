@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.modules.payments import schemas
 from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, PaymentStatus, PaymentWebhookEvent
@@ -327,6 +328,20 @@ class PaymentService:
         user_id: uuid.UUID,
     ) -> tuple[schemas.DokuCheckoutResponse, Order]:
         registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+        registration = None
+        if payload.order_id is not None:
+            latest_order = await PaymentRepository.get_order_for_user(session, payload.order_id, user_id)
+            if latest_order is None:
+                raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+            if latest_order.status == OrderStatus.PAID:
+                latest_payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
+                return schemas.DokuCheckoutResponse(payment_url="", already_paid=True, payment_id=latest_payment.id if latest_payment else None, order_status=latest_order.status, requires_payment=False), latest_order
+            if latest_order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+                raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
+            payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
+        else:
+            latest_order = None
+            payment = None
         if payload.registration_id is not None:
             registration = next(
                 (reg for reg in registrations if reg.id == payload.registration_id),
@@ -337,20 +352,21 @@ class PaymentService:
                     code="REGISTRATION_NOT_OWNED",
                     message="Registrasi tidak ditemukan untuk akun ini",
                 )
-        else:
+        elif payload.order_id is None:
             payable = [
                 reg for reg in registrations
                 if getattr(reg.status, "value", reg.status) in {"awaiting_payment", "payment_pending", "verified", "draft"}
             ]
             registration = payable[0] if payable else (registrations[0] if registrations else None)
 
-        if registration is None:
+        if registration is None and payload.order_id is None:
             raise NotFoundException(
                 code="REGISTRATION_NOT_FOUND",
                 message="Tidak ada registrasi untuk akun ini",
             )
 
-        latest_order = await PaymentRepository.get_latest_order(session, registration.id)
+        if payload.order_id is None:
+            latest_order = await PaymentRepository.get_latest_order(session, registration.id)
         if latest_order and latest_order.status == OrderStatus.PAID:
             latest_payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
             payment_id = latest_payment.id if latest_payment else None
@@ -366,7 +382,7 @@ class PaymentService:
             )
 
         if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.DRAFT]:
-            payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
+            payment = payment or await PaymentRepository.get_payment_by_order(session, latest_order.id)
             if not payment:
                 payment = await PaymentRepository.create_doku_payment(session, latest_order)
             if payment.provider == "doku" and payment.checkout_url:
@@ -378,11 +394,19 @@ class PaymentService:
             latest_order = await PaymentRepository.create_order(session, registration.id)
             payment = await PaymentRepository.create_doku_payment(session, latest_order)
 
-        participant = await session.get(ParticipantProfile, registration.participant_id)
-        user = await session.get(User, participant.user_id) if participant else None
-        event = await session.get(Event, registration.event_id)
-        if not participant or not user or not event:
-            raise ValidationException("PAYMENT_DATA_INCOMPLETE", "Data participant atau event tidak lengkap")
+        participant = await session.get(ParticipantProfile, registration.participant_id) if registration else None
+        user = await session.get(User, participant.user_id) if participant else await session.get(User, user_id)
+        event = await session.get(Event, registration.event_id) if registration else None
+        if event is None:
+            from app.modules.store.models import Product, OrderItem
+            event_id = (await session.execute(select(Product.event_id).join(OrderItem, OrderItem.product_id == Product.id).where(OrderItem.order_id == latest_order.id).limit(1))).scalar_one_or_none()
+            event = await session.get(Event, event_id) if event_id else None
+        if not user or not event:
+            raise ValidationException("PAYMENT_DATA_INCOMPLETE", "Data user atau event tidak lengkap")
+        customer_name = participant.full_name if participant else (user.full_name or user.email)
+        customer_id = str(participant.id) if participant else str(user.id)
+        from app.modules.store.models import OrderItem
+        order_items = list((await session.execute(select(OrderItem).where(OrderItem.order_id == latest_order.id))).scalars())
         amount = float(latest_order.total_amount)
         if amount.is_integer(): amount = int(amount)
         request_body = {
@@ -392,11 +416,11 @@ class PaymentService:
                 "currency": latest_order.currency,
                 "callback_url": get_settings().DOKU_CALLBACK_URL,
                 "auto_redirect": True,
-                "line_items": [{"name": f"IWBIF 2026 - {registration.registration_number}", "price": amount, "quantity": 1}],
+                "line_items": ([{"name": item.product_name, "price": float(item.unit_price), "quantity": item.quantity} for item in order_items] or [{"name": f"IWBIF 2026 - {registration.registration_number if registration else latest_order.order_number}", "price": amount, "quantity": 1}]),
             },
             "payment": {"payment_due_date": get_settings().DOKU_PAYMENT_DUE_MINUTES},
-            "customer": {"id": str(participant.id), "name": participant.full_name, "email": user.email, "phone": user.phone or ""},
-            "additional_info": {"event_id": str(event.id), "registration_id": str(registration.id)},
+            "customer": {"id": customer_id, "name": customer_name, "email": user.email, "phone": user.phone or ""},
+            "additional_info": {"event_id": str(event.id), "registration_id": str(registration.id) if registration else "", "order_id": str(latest_order.id)},
         }
         response, request_id = await DokuCheckoutClient().create_payment(request_body)
         response_payment = response.get("response", {}).get("payment", response.get("payment", {}))
