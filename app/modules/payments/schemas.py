@@ -2,12 +2,18 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateDokuCheckoutRequest(BaseModel):
     registration_id: UUID | None = None
     order_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_source(self):
+        if (self.registration_id is None) == (self.order_id is None):
+            raise ValueError("Exactly one of registration_id or order_id must be provided")
+        return self
 
 
 class ManualPaymentConfirmRequest(BaseModel):

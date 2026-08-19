@@ -15,8 +15,20 @@ except Exception:  # pragma: no cover - optional dependency
 
 try:
     from jose import jwt as jose_jwt
+    from jose.exceptions import ExpiredSignatureError as JoseExpiredSignatureError
+    from jose.exceptions import JWTError as JoseJWTError
 except Exception:  # pragma: no cover - optional dependency
     jose_jwt = None
+    JoseExpiredSignatureError = None
+    JoseJWTError = None
+
+
+class TokenDecodeError(ValueError):
+    pass
+
+
+class TokenExpiredError(TokenDecodeError):
+    pass
 
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto") if CryptContext is not None else None
@@ -68,17 +80,20 @@ def _fallback_encode(payload: dict[str, Any], settings) -> str:
 def _fallback_decode(token: str, settings) -> dict[str, Any]:
     parts = token.split(".")
     if len(parts) != 3:
-        raise ValueError("Invalid token")
+        raise TokenDecodeError("Invalid token")
     header_b64, payload_b64, signature = parts
     signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
     expected = _sign(signing_input, settings.JWT_SECRET_KEY)
     if not hmac.compare_digest(signature, expected):
-        raise ValueError("Invalid token signature")
-    payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+        raise TokenDecodeError("Invalid token signature")
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise TokenDecodeError("Invalid token payload") from exc
     exp_ts = payload.get("exp")
     if isinstance(exp_ts, int):
         if datetime.fromtimestamp(exp_ts, tz=timezone.utc) < datetime.now(timezone.utc):
-            raise ValueError("Token expired")
+            raise TokenExpiredError("Token expired")
     return payload
 
 
@@ -135,6 +150,11 @@ def create_refresh_token(subject: str, extra: dict[str, Any] | None = None) -> s
 def decode_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     if jose_jwt is not None:
-        return jose_jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        try:
+            return jose_jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        except JoseExpiredSignatureError as exc:
+            raise TokenExpiredError("Token expired") from exc
+        except JoseJWTError as exc:
+            raise TokenDecodeError("Invalid token") from exc
     return _fallback_decode(token, settings)
 

@@ -142,8 +142,10 @@ class IwbifService:
         return {"id": reg.id, "event_id": reg.event_id, "participant_id": reg.participant_id, "registration_number": reg.registration_number, "status": reg.status.value if hasattr(reg.status, "value") else reg.status, "detail": values}
 
     @staticmethod
-    async def submit(db, registration_id, user_id):
+    async def submit(db, event_id, registration_id, user_id):
         reg = await IwbifService.owned_registration(db, registration_id, user_id)
+        if reg.event_id != event_id:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
         if reg.status != RegistrationStatus.DRAFT: raise ConflictException("INVALID_REGISTRATION_STATUS", "Hanya draft yang dapat dikirim")
         passport = (await db.execute(select(RegistrationDocument.id).where(RegistrationDocument.registration_id == reg.id, RegistrationDocument.document_type == "PASSPORT_COPY"))).first()
         if not passport: raise ValidationException("PASSPORT_REQUIRED", "Passport Copy wajib diunggah sebelum submit")
@@ -152,7 +154,9 @@ class IwbifService:
 
     @staticmethod
     async def save_document(db, registration_id, user_id, document_type, file: UploadFile):
-        await IwbifService.owned_registration(db, registration_id, user_id)
+        registration = await IwbifService.owned_registration(db, registration_id, user_id)
+        if registration.status != RegistrationStatus.DRAFT:
+            raise ConflictException("REGISTRATION_NOT_EDITABLE", "Dokumen hanya dapat diunggah saat registrasi masih draft")
         if document_type not in DOCUMENT_TYPES: raise ValidationException("INVALID_DOCUMENT_TYPE", "Tipe dokumen tidak valid")
         extension = ALLOWED_DOCUMENT_MIME.get(file.content_type or "")
         if not extension: raise ValidationException("INVALID_DOCUMENT_MIME", "Dokumen harus PDF, JPG, atau PNG")
@@ -165,8 +169,10 @@ class IwbifService:
         db.add(row); await db.commit(); await db.refresh(row); return row
 
     @staticmethod
-    async def update_registration(db, registration_id, user_id, payload):
+    async def update_registration(db, event_id, registration_id, user_id, payload):
         reg = await IwbifService.owned_registration(db, registration_id, user_id)
+        if reg.event_id != event_id:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
         if reg.status != RegistrationStatus.DRAFT: raise ConflictException("REGISTRATION_NOT_EDITABLE", "Hanya draft yang dapat diubah")
         if payload.participant_id and reg.participant_id != payload.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
         package = await db.get(DelegatePackage, payload.delegate_package_id)
@@ -181,6 +187,16 @@ class IwbifService:
         for key, value in data.items(): setattr(detail, key, value)
         await IwbifService.replace_registration_relations(db, reg.id, payload)
         await db.commit(); return reg
+
+    @staticmethod
+    async def require_paid_order(db, registration_id):
+        paid_order_id = (await db.execute(
+            select(Order.id)
+            .where(Order.registration_id == registration_id, Order.status == OrderStatus.PAID)
+            .limit(1)
+        )).scalar_one_or_none()
+        if paid_order_id is None:
+            raise ConflictException("REGISTRATION_PAYMENT_REQUIRED", "Pembayaran registrasi belum berhasil")
 
     @staticmethod
     async def create_exhibitor(db, event_id, user_id, payload):

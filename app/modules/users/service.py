@@ -84,7 +84,10 @@ class UserService:
                 if item["type"] in {"delegate", "exhibitor"}:
                     selected_products.append({**item, "source": "order", "order_id": order["id"], "order_status": order["status"], "payment_status": order["payment"]["status"] if order["payment"] else None})
 
-        selected_types = sorted({row["type"] for row in registrations})
+        selected_types = sorted(
+            {row["type"] for row in registrations}
+            | {product["type"] for product in selected_products}
+        )
         delegate_rows = [row for row in registrations if row["type"] == "delegate"]
         exhibitor_rows = [row for row in registrations if row["type"] == "exhibitor"]
         complete_delegate_statuses = {"submitted", "under_verification", "verified", "payment_pending", "paid", "confirmed"}

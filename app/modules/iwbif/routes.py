@@ -90,14 +90,12 @@ async def registration(event_id: UUID, registration_id: UUID, request: Request, 
 
 @router.patch("/events/{event_id}/registrations/{registration_id}")
 async def update_registration(event_id: UUID, registration_id: UUID, payload: schemas.DelegateRegistrationWrite, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    reg = await IwbifService.update_registration(db, registration_id, user.id, payload)
-    if reg.event_id != event_id: raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
+    reg = await IwbifService.update_registration(db, event_id, registration_id, user.id, payload)
     return success_response("Draft registrasi berhasil diperbarui", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
 @router.post("/events/{event_id}/registrations/{registration_id}/submit")
 async def submit(event_id: UUID, registration_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    reg = await IwbifService.submit(db, registration_id, user.id)
-    if reg.event_id != event_id: raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
+    reg = await IwbifService.submit(db, event_id, registration_id, user.id)
     return success_response("Registrasi berhasil dikirim untuk verifikasi", {"id": reg.id, "status": reg.status}, request=request)
 
 @router.delete("/events/{event_id}/registrations/{registration_id}")
@@ -211,6 +209,8 @@ def admin_command(target_status):
         if not row: raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
         allowed = {RegistrationStatus.UNDER_VERIFICATION: {RegistrationStatus.SUBMITTED}, RegistrationStatus.VERIFIED: {RegistrationStatus.UNDER_VERIFICATION, RegistrationStatus.SUBMITTED}, RegistrationStatus.CONFIRMED: {RegistrationStatus.VERIFIED, RegistrationStatus.PAID}, RegistrationStatus.REJECTED: {RegistrationStatus.SUBMITTED, RegistrationStatus.UNDER_VERIFICATION, RegistrationStatus.VERIFIED}}
         if row.status not in allowed[target_status]: raise ConflictException("INVALID_REGISTRATION_TRANSITION", "Transisi registrasi tidak valid")
+        if target_status == RegistrationStatus.CONFIRMED:
+            await IwbifService.require_paid_order(db, row.id)
         row.status = target_status
         if target_status == RegistrationStatus.CONFIRMED: row.confirmed_at = datetime.now(timezone.utc)
         await db.commit(); return success_response("Status registrasi berhasil diubah", {"id": row.id, "status": row.status}, request=request)

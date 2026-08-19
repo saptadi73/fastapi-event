@@ -48,7 +48,19 @@ class StoreService:
 
     @staticmethod
     async def checkout(db: AsyncSession, user_id, event_id):
-        cart, rows = await StoreService.get_cart(db, user_id, event_id)
+        cart = (await db.execute(
+            select(Cart)
+            .where(Cart.user_id == user_id, Cart.event_id == event_id)
+            .with_for_update()
+        )).scalar_one_or_none()
+        if not cart:
+            raise ValidationException("EMPTY_CART", "Cart masih kosong")
+        rows = (await db.execute(
+            select(CartItem, Product)
+            .join(Product, Product.id == CartItem.product_id)
+            .where(CartItem.cart_id == cart.id)
+            .order_by(Product.product_type, Product.name)
+        )).all()
         if not rows:
             raise ValidationException("EMPTY_CART", "Cart masih kosong")
         currencies = {product.currency for _, product in rows}
