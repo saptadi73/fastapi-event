@@ -62,7 +62,8 @@ def upgrade() -> None:
 
     company_by_participant = {}
     delegates = bind.execute(sa.text("""
-        SELECT r.participant_id, d.registration_id, d.company_organization, d.country,
+        SELECT r.participant_id, d.registration_id, d.company_organization,
+               'Other' AS country,
                d.company_address, d.company_website, d.participation_categories,
                d.activity_ids, d.room_preference, d.preferred_roommate,
                d.arrival_date, d.departure_date, d.flight_number, d.airport,
@@ -95,7 +96,7 @@ def upgrade() -> None:
         for activity_id in row["activity_ids"] or []:
             bind.execute(pg_insert(RegistrationActivity.__table__).values(registration_id=row["registration_id"], activity_id=uuid.UUID(str(activity_id))).on_conflict_do_nothing())
 
-    for row in bind.execute(sa.text("SELECT id, participant_id, company_name, country FROM exhibitor_registrations")).mappings():
+    for row in bind.execute(sa.text("SELECT id, participant_id, company_name, 'Other' AS country FROM exhibitor_registrations")).mappings():
         company_id = company_by_participant.get(row["participant_id"])
         if company_id is None:
             existing = bind.execute(sa.text("SELECT id FROM companies WHERE participant_id=:participant_id"), {"participant_id": row["participant_id"]}).scalar_one_or_none()

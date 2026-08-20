@@ -15,10 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column("delegate_registration_details", "country")
-    op.drop_column("delegate_registration_details", "mobile_whatsapp")
-    op.drop_column("exhibitor_registrations", "country")
-    op.drop_column("exhibitor_registrations", "phone")
+    op.execute("ALTER TABLE delegate_registration_details DROP COLUMN IF EXISTS country")
+    op.execute("ALTER TABLE delegate_registration_details DROP COLUMN IF EXISTS mobile_whatsapp")
+    op.execute("ALTER TABLE exhibitor_registrations DROP COLUMN IF EXISTS country")
+    op.execute("ALTER TABLE exhibitor_registrations DROP COLUMN IF EXISTS phone")
 
 
 def downgrade() -> None:
