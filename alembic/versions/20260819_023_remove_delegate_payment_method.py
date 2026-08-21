@@ -15,7 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column("delegate_registration_details", "preferred_payment_method")
+    op.execute(
+        "ALTER TABLE delegate_registration_details "
+        "DROP COLUMN IF EXISTS preferred_payment_method"
+    )
 
 
 def downgrade() -> None:
