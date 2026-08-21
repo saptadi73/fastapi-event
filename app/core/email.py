@@ -8,10 +8,19 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def _send_message(message: EmailMessage, host: str, port: int, username: str, password: str, use_tls: bool) -> None:
-    with smtplib.SMTP(host, port, timeout=30) as client:
+def _send_message(
+    message: EmailMessage,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    use_ssl: bool,
+    use_tls: bool,
+) -> None:
+    smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_class(host, port, timeout=30) as client:
         client.ehlo()
-        if use_tls:
+        if use_tls and not use_ssl:
             client.starttls()
             client.ehlo()
         client.login(username, password)
@@ -45,6 +54,7 @@ async def send_registration_confirmation(email: str) -> None:
             settings.EMAIL_SMTP_PORT,
             settings.EMAIL_SMTP_USERNAME,
             settings.EMAIL_SMTP_PASSWORD,
+            settings.EMAIL_SMTP_USE_SSL,
             settings.EMAIL_SMTP_USE_TLS,
         )
     except Exception:

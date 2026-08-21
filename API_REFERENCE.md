@@ -73,7 +73,7 @@ Registrasi awal hanya membuat akun. `full_name` dan profile participant/delegate
 belum wajib pada tahap ini.
 
 Jika `EMAIL_ENABLED=true`, backend mengirim email konfirmasi registrasi dari
-`events@kupu-gsc.co.id` melalui Google Workspace SMTP. Email berisi konfirmasi
+`info@iwbif.id` melalui Titan Email SMTP. Email berisi konfirmasi
 registrasi IWBIF 2026 dan `FRONTEND_LOGIN_URL` untuk melanjutkan login. Pengiriman
 dilakukan sebagai background task; kegagalan SMTP dicatat di log dan tidak
 membatalkan akun yang sudah berhasil dibuat.

@@ -25,12 +25,13 @@ class Settings(BaseSettings):
     PROJECT_TIMEZONE: str = "Asia/Jakarta"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
     EMAIL_ENABLED: bool = False
-    EMAIL_SMTP_HOST: str = "smtp.gmail.com"
-    EMAIL_SMTP_PORT: int = 587
-    EMAIL_SMTP_USE_TLS: bool = True
-    EMAIL_SMTP_USERNAME: str = "events@kupu-gsc.co.id"
+    EMAIL_SMTP_HOST: str = "smtp.titan.email"
+    EMAIL_SMTP_PORT: int = 465
+    EMAIL_SMTP_USE_SSL: bool = True
+    EMAIL_SMTP_USE_TLS: bool = False
+    EMAIL_SMTP_USERNAME: str = "info@iwbif.id"
     EMAIL_SMTP_PASSWORD: str = ""
-    EMAIL_FROM_ADDRESS: str = "events@kupu-gsc.co.id"
+    EMAIL_FROM_ADDRESS: str = "info@iwbif.id"
     EMAIL_FROM_NAME: str = "IWBIF 2026"
     FRONTEND_LOGIN_URL: str = "http://localhost:3000/login"
 
