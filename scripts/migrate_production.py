@@ -34,6 +34,7 @@ REQUIRED_TABLES = {
     "delegate_packages",
     "direct_debit_bindings",
     "exhibitor_registrations",
+    "event_speakers",
     "messages",
     "orders",
     "payment_channels",

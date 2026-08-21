@@ -36,7 +36,7 @@ from app.modules.participants.models import ParticipantProfile
 from app.modules.payments.models import Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.sessions.models import EventSession
-from app.modules.speakers.models import Speaker
+from app.modules.speakers.models import EventSpeaker, Speaker
 from app.modules.store.models import Product
 from app.modules.tickets.models import QRToken, Ticket, TicketStatus
 from app.modules.users.models import User
@@ -162,7 +162,7 @@ async def seed():
             profile_slots.append(await ensure(db, BusinessMatchingSlot, event_id=event.id, label=label, defaults=dict(slot_date=day, start_time=start, end_time=end, capacity=125, is_active=True)))
 
         password = hash_password(seed_password)
-        admin = await ensure_user(db, email="organizer@iwbif2026.org", password_hash=password, defaults=dict(full_name="IWBIF 2026 Organizer", phone="+6281100002026", status="active", role="organizer", is_email_verified=True))
+        admin = await ensure_user(db, email="organizer@iwbif2026.org", password_hash=password, defaults=dict(full_name="IWBIF 2026 Organizer", phone="+6281100002026", country="Indonesia", status="active", role="organizer", is_email_verified=True))
         users, participants, registrations, profiles = [], [], [], []
         activity_ids = [str(x.id) for x in activity.values()]
         for idx, (email, full_name, company, job, country, sector, package_code, looking, preferred, interests, needs) in enumerate(DELEGATES, 1):
@@ -222,10 +222,13 @@ async def seed():
                 status="published",
             )
             if speaker is None:
-                db.add(Speaker(full_name=name, **defaults))
+                speaker = Speaker(full_name=name, **defaults)
+                db.add(speaker)
+                await db.flush()
             else:
                 for key, value in defaults.items():
                     setattr(speaker, key, value)
+            await ensure(db, EventSpeaker, event_id=event.id, speaker_id=speaker.id)
 
         program = [
             ("opening-ceremony", "Opening Ceremony", "ceremony", 16, 8, 30, 60),
