@@ -8,7 +8,7 @@ from app.core.database import Base
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
 from app.modules.check_ins.models import CheckIn
-from app.modules.speakers.models import Speaker
+from app.modules.speakers.models import Speaker, EventSpeaker
 from app.modules.sessions.models import EventSession
 from app.modules.registrations.models import Registration
 from app.modules.tickets.models import Ticket, QRToken

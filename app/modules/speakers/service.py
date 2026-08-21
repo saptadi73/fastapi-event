@@ -18,6 +18,10 @@ class SpeakerService:
         return await SpeakerRepository.list_featured(session, limit=size)
 
     @staticmethod
+    async def list_featured_by_event(session: AsyncSession, event_id: UUID, size: int = 100):
+        return await SpeakerRepository.list_featured_by_event(session, event_id, limit=size)
+
+    @staticmethod
     async def get(session: AsyncSession, speaker_id: UUID):
         speaker = await SpeakerRepository.get_by_id(session, speaker_id)
         return schemas.SpeakerRead.model_validate(speaker)

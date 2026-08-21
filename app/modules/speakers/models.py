@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, JSON, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, JSON, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -24,3 +24,11 @@ class Speaker(Base):
     session_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(30), default="draft")
+
+
+class EventSpeaker(Base):
+    __tablename__ = "event_speakers"
+    __table_args__ = (UniqueConstraint("event_id", "speaker_id", name="uq_event_speaker"),)
+
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    speaker_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("speakers.id", ondelete="CASCADE"), primary_key=True)

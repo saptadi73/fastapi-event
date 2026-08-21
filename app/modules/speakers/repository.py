@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
-from app.modules.speakers.models import Speaker
+from app.modules.speakers.models import EventSpeaker, Speaker
 
 
 class SpeakerRepository:
@@ -17,6 +17,14 @@ class SpeakerRepository:
     @staticmethod
     async def list_featured(session: AsyncSession, limit: int = 100):
         stmt = select(Speaker).where(Speaker.is_featured == True).order_by(Speaker.created_at.desc()).limit(limit)
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    @staticmethod
+    async def list_featured_by_event(session: AsyncSession, event_id: uuid.UUID, limit: int = 100):
+        stmt = (select(Speaker).join(EventSpeaker, EventSpeaker.speaker_id == Speaker.id)
+                .where(EventSpeaker.event_id == event_id, Speaker.is_featured.is_(True))
+                .order_by(Speaker.created_at.desc()).limit(limit))
         result = await session.execute(stmt)
         return result.scalars().all()
 

@@ -53,8 +53,8 @@ async def get_event_speakers(
     slug: str,
     db: AsyncSession = Depends(get_db_session),
 ):
-    await EventService.get_by_slug(db, slug)
-    speakers = await SpeakerService.list_featured(db, size=100)
+    event = await EventService.get_by_slug(db, slug)
+    speakers = await SpeakerService.list_featured_by_event(db, event.id, size=100)
     data = [speaker_schemas.SpeakerRead.model_validate(row) for row in speakers]
     return success_response("Speaker event ditemukan", data=data, request=request)
 
