@@ -38,5 +38,12 @@ class EventService:
     @staticmethod
     async def update(session: AsyncSession, event_id: UUID, payload: schemas.EventUpdate):
         event = await EventRepository.get_event_by_id(session, event_id)
-        return await EventRepository.update(session=session, event=event, **payload.model_dump(exclude_unset=True))
+        changes = payload.model_dump(exclude_unset=True)
+        if (changes.get("start_at") or event.start_at) >= (changes.get("end_at") or event.end_at):
+            raise ValidationException(code="INVALID_TIME", message="start_at harus lebih awal dari end_at")
+        return await EventRepository.update(session=session, event=event, **changes)
 
+    @staticmethod
+    async def delete(session: AsyncSession, event_id: UUID) -> None:
+        event = await EventRepository.get_event_by_id(session, event_id)
+        await EventRepository.delete(session, event)

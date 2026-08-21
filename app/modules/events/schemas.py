@@ -22,9 +22,13 @@ class EventCreate(EventBase):
 
 class EventUpdate(BaseModel):
     name: str | None = None
+    slug: str | None = Field(default=None, min_length=3, max_length=120)
     description: str | None = None
     venue_name: str | None = None
     venue_address: str | None = None
+    timezone: str | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     capacity: int | None = Field(default=None, ge=1)
     status: str | None = None
 

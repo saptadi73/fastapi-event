@@ -28,8 +28,10 @@ from app.core.config import get_settings
 
 REQUIRED_TABLES = {
     "alembic_version",
+    "announcements",
     "business_matching_profiles",
     "companies",
+    "certificates",
     "conversations",
     "delegate_packages",
     "direct_debit_bindings",

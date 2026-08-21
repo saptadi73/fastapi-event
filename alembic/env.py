@@ -16,6 +16,7 @@ from app.modules.payments.models import Order, Payment, PaymentWebhookEvent, Dir
 from app.modules.users.models import User
 from app.modules.business_matching import models as business_matching_models
 from app.modules.iwbif import models as iwbif_models
+from app.modules.admin_content import models as admin_content_models
 
 config = context.config
 fileConfig(config.config_file_name)

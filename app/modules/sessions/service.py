@@ -32,3 +32,7 @@ class SessionService:
         updated = await SessionRepository.update(session, existing, payload.model_dump(exclude_unset=True))
         return schemas.SessionRead.model_validate(updated)
 
+    @staticmethod
+    async def delete(session: AsyncSession, session_id: UUID) -> None:
+        existing = await SessionRepository.get(session, session_id)
+        await SessionRepository.delete(session, existing)

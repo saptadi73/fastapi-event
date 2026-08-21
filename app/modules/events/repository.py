@@ -68,3 +68,7 @@ class EventRepository:
         await session.refresh(event)
         return event
 
+    @staticmethod
+    async def delete(session: AsyncSession, event: Event) -> None:
+        await session.delete(event)
+        await session.commit()

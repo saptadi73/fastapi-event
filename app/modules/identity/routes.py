@@ -80,10 +80,11 @@ async def login(
     db: AsyncSession = Depends(get_db_session),
 ):
     user, access_token, refresh_token = await UserService.login(db, payload)
+    tracking = await UserService.get_registration_detail(db, user.id)
     return success_response(
         "Login berhasil",
         data={
-            "user": user,
+            **tracking,
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",

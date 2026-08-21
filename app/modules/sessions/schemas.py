@@ -23,7 +23,9 @@ class SessionCreate(SessionBase):
 
 class SessionUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=255)
+    slug: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = None
+    session_type: str | None = None
     room_name: str | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None

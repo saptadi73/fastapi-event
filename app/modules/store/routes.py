@@ -43,6 +43,17 @@ async def update_product(product_id: UUID, payload: schemas.ProductWrite, reques
     return success_response("Product berhasil diperbarui", schemas.ProductRead.model_validate(row), request=request)
 
 
+@router.delete("/admin/products/{product_id}")
+async def delete_product(product_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await db.get(Product, product_id)
+    if not row:
+        from app.core.exceptions import NotFoundException
+        raise NotFoundException("PRODUCT_NOT_FOUND", "Product tidak ditemukan")
+    await db.delete(row)
+    await db.commit()
+    return success_response("Product berhasil dihapus", {"id": product_id}, request=request)
+
+
 @router.get("/events/{event_id}/cart")
 async def get_cart(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     cart, rows = await StoreService.get_cart(db, user.id, event_id)
@@ -67,4 +78,3 @@ async def remove_cart_item(event_id: UUID, product_id: UUID, request: Request, u
 async def checkout(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     order, item_count = await StoreService.checkout(db, user.id, event_id)
     return success_response("Order berhasil dibuat dan menunggu pembayaran", schemas.CheckoutRead(order_id=order.id, order_number=order.order_number, total_amount=float(order.total_amount), currency=order.currency, status=order.status, item_count=item_count, created_at=order.created_at), request=request)
-

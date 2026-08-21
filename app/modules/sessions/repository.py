@@ -31,13 +31,18 @@ class SessionRepository:
 
     @staticmethod
     async def update(session: AsyncSession, existing: EventSession, payload: dict) -> EventSession:
+        effective_start = payload.get("start_at") or existing.start_at
+        effective_end = payload.get("end_at") or existing.end_at
+        if effective_start >= effective_end:
+            raise ValidationException(code="INVALID_TIME", message="start_at harus lebih awal dari end_at")
         for key, value in payload.items():
             if value is not None:
                 setattr(existing, key, value)
-        if "start_at" in payload and "end_at" in payload and payload["start_at"] and payload["end_at"]:
-            if payload["start_at"] >= payload["end_at"]:
-                raise ValidationException(code="INVALID_TIME", message="start_at harus lebih awal dari end_at")
         await session.commit()
         await session.refresh(existing)
         return existing
 
+    @staticmethod
+    async def delete(session: AsyncSession, existing: EventSession) -> None:
+        await session.delete(existing)
+        await session.commit()

@@ -27,8 +27,12 @@ class SpeakerUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     professional_title: str | None = None
     organization_name: str | None = None
+    country_code: str | None = None
     biography: str | None = None
     profile_photo_url: str | None = None
+    linkedin_url: str | None = None
+    website_url: str | None = None
+    expertise_tags: list[str] | None = None
     session_title: str | None = None
     status: str | None = None
     is_featured: bool | None = None
@@ -40,3 +44,7 @@ class SpeakerRead(SpeakerBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EventSpeakerWrite(BaseModel):
+    event_id: UUID

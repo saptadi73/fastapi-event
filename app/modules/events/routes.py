@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from app.core.dependencies import get_db_session, require_admin
 from app.support.responses import success_response
@@ -80,3 +81,9 @@ async def update_event(
 ):
     event = await EventService.update(db, event_id, payload)
     return success_response("Event berhasil diperbarui", data=schemas.EventRead.model_validate(event), request=request)
+
+
+@router.delete("/{event_id}", summary="Delete event")
+async def delete_event(request: Request, event_id: UUID, db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    await EventService.delete(db, event_id)
+    return success_response("Event berhasil dihapus", data={"id": str(event_id)}, request=request)

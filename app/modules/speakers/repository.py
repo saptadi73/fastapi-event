@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
@@ -51,3 +51,24 @@ class SpeakerRepository:
         await session.commit()
         await session.refresh(speaker)
         return speaker
+
+    @staticmethod
+    async def delete(session: AsyncSession, speaker: Speaker) -> None:
+        await session.delete(speaker)
+        await session.commit()
+
+    @staticmethod
+    async def assign_event(session: AsyncSession, speaker_id: uuid.UUID, event_id: uuid.UUID) -> None:
+        existing = await session.get(EventSpeaker, {"event_id": event_id, "speaker_id": speaker_id})
+        if not existing:
+            session.add(EventSpeaker(event_id=event_id, speaker_id=speaker_id))
+            await session.commit()
+
+    @staticmethod
+    async def remove_event(session: AsyncSession, speaker_id: uuid.UUID, event_id: uuid.UUID) -> bool:
+        result = await session.execute(delete(EventSpeaker).where(
+            EventSpeaker.event_id == event_id,
+            EventSpeaker.speaker_id == speaker_id,
+        ))
+        await session.commit()
+        return bool(result.rowcount)

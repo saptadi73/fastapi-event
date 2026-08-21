@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.speakers import schemas
 from app.modules.speakers.repository import SpeakerRepository
+from app.core.exceptions import NotFoundException
+from app.modules.events.models import Event
 
 
 class SpeakerService:
@@ -38,3 +40,21 @@ class SpeakerService:
         payload_data = payload.model_dump(exclude_unset=True)
         updated = await SpeakerRepository.update(session, speaker, payload_data)
         return schemas.SpeakerRead.model_validate(updated)
+
+    @staticmethod
+    async def delete(session: AsyncSession, speaker_id: UUID) -> None:
+        speaker = await SpeakerRepository.get_by_id(session, speaker_id)
+        await SpeakerRepository.delete(session, speaker)
+
+    @staticmethod
+    async def assign_event(session: AsyncSession, speaker_id: UUID, event_id: UUID) -> None:
+        await SpeakerRepository.get_by_id(session, speaker_id)
+        if not await session.get(Event, event_id):
+            raise NotFoundException(code="EVENT_NOT_FOUND", message="Event tidak ditemukan")
+        await SpeakerRepository.assign_event(session, speaker_id, event_id)
+
+    @staticmethod
+    async def remove_event(session: AsyncSession, speaker_id: UUID, event_id: UUID) -> None:
+        await SpeakerRepository.get_by_id(session, speaker_id)
+        if not await SpeakerRepository.remove_event(session, speaker_id, event_id):
+            raise NotFoundException(code="EVENT_SPEAKER_NOT_FOUND", message="Speaker tidak terhubung ke event")

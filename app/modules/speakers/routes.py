@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db_session, require_admin
@@ -71,3 +72,21 @@ async def upload_speaker_photo(
         schemas.SpeakerUpdate(profile_photo_url=photo_url),
     )
     return success_response("Foto speaker berhasil diunggah", data=speaker, request=request)
+
+
+@router.delete("/{speaker_id}", summary="Delete speaker")
+async def delete_speaker(request: Request, speaker_id: UUID, db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    await SpeakerService.delete(db, speaker_id)
+    return success_response("Speaker berhasil dihapus", data={"id": speaker_id}, request=request)
+
+
+@router.post("/{speaker_id}/events", summary="Assign speaker to event")
+async def assign_speaker_event(request: Request, speaker_id: UUID, payload: schemas.EventSpeakerWrite, db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    await SpeakerService.assign_event(db, speaker_id, payload.event_id)
+    return success_response("Speaker berhasil dihubungkan ke event", data={"speaker_id": speaker_id, "event_id": payload.event_id}, request=request)
+
+
+@router.delete("/{speaker_id}/events/{event_id}", summary="Remove speaker from event")
+async def remove_speaker_event(request: Request, speaker_id: UUID, event_id: UUID, db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    await SpeakerService.remove_event(db, speaker_id, event_id)
+    return success_response("Relasi speaker dan event berhasil dihapus", data={"speaker_id": speaker_id, "event_id": event_id}, request=request)

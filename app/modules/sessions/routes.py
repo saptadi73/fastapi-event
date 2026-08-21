@@ -53,3 +53,9 @@ async def update_session(
 ):
     data = await SessionService.update(db, session_id, payload)
     return success_response("Session berhasil diubah", data=data, request=request)
+
+
+@router.delete("/{session_id}", summary="Delete session")
+async def delete_session(request: Request, session_id: UUID, db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    await SessionService.delete(db, session_id)
+    return success_response("Session berhasil dihapus", data={"id": session_id}, request=request)
