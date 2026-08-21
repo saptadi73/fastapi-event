@@ -1043,6 +1043,22 @@ Certificate diterbitkan untuk satu user per event dengan payload
 `{"event_id":"uuid","user_id":"uuid","certificate_number":"IWBIF-2026-0001","title":"Certificate of Attendance","download_url":"https://...","issued_at":null}`.
 Semua endpoint `/admin/...` memerlukan role `admin` atau `organizer`.
 
+Manajemen user dan role:
+
+```text
+GET  /api/v1/admin/users?page=1&size=20&role=participant&status=active
+POST /api/v1/admin/users
+PUT  /api/v1/admin/users/{user_id}
+```
+
+Create user menerima `email`, `password`, `full_name`, `phone`, `country`,
+`role`, `status`, dan `is_email_verified`. Update menerima subset selain email
+dan password. Nilai role adalah `participant`, `organizer`, atau `admin`; status
+adalah `active`, `inactive`, atau `suspended`. Organizer dapat membuat dan
+mengelola participant/organizer, tetapi hanya role `admin` yang dapat membuat
+atau mengubah akun admin. Backend juga mencegah admin/organizer menonaktifkan
+atau mengganti role akun sendiri untuk menghindari self-lockout.
+
 ## 16. Health dan alur frontend
 
 ```http

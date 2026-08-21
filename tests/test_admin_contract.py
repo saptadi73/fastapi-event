@@ -8,6 +8,8 @@ from app.main import app
 from app.modules.users.schemas import UserRead
 from app.modules.identity import routes as identity_routes
 from app.modules.users.schemas import UserLogin
+from app.modules.users.admin_routes import ensure_role_authority
+from app.core.exceptions import ValidationException
 
 
 class AdminApiContractTests(unittest.TestCase):
@@ -45,8 +47,19 @@ class AdminApiContractTests(unittest.TestCase):
             ("GET", "/api/v1/certificates/me"),
             ("POST", "/api/v1/admin/certificates"),
             ("DELETE", "/api/v1/admin/certificates/{item_id}"),
+            ("GET", "/api/v1/admin/users"),
+            ("POST", "/api/v1/admin/users"),
+            ("PUT", "/api/v1/admin/users/{user_id}"),
         }
         self.assertTrue(expected.issubset(routes), expected - routes)
+
+    def test_organizer_cannot_grant_admin_role(self):
+        actor = SimpleNamespace(role="organizer")
+        with self.assertRaises(ValidationException):
+            ensure_role_authority(actor, "admin")
+
+    def test_admin_can_grant_admin_role(self):
+        ensure_role_authority(SimpleNamespace(role="admin"), "admin")
 
 
 class LoginContractTests(unittest.IsolatedAsyncioTestCase):

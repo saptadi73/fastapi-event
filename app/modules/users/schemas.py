@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
 
 
 class UserBase(BaseModel):
@@ -67,3 +68,19 @@ class UserProfileSnapshot(BaseModel):
     profile_photo_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AdminUserCreate(UserCreate):
+    full_name: str | None = Field(default=None, min_length=2, max_length=255)
+    role: Literal["participant", "organizer", "admin"] = "participant"
+    status: Literal["active", "inactive", "suspended"] = "active"
+    is_email_verified: bool = False
+
+
+class AdminUserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=255)
+    phone: str | None = Field(default=None, min_length=5, max_length=40)
+    country: str | None = Field(default=None, min_length=2, max_length=100)
+    role: Literal["participant", "organizer", "admin"] | None = None
+    status: Literal["active", "inactive", "suspended"] | None = None
+    is_email_verified: bool | None = None
