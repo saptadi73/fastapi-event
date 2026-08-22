@@ -1042,6 +1042,65 @@ POST /api/v1/check-ins/manual
 `GET /api/v1/check-ins?event_id={optional_uuid}` mengembalikan check-in. Kontrol
 ini tidak boleh tampil di UI peserta.
 
+### Absensi Hari-H (rekomendasi untuk scanner)
+
+Frontend scanning dapat dipisah ke modul attendance untuk report yang lebih jelas:
+
+```http
+POST /api/v1/attendance/scan
+GET  /api/v1/attendance/events/{event_id}/report?include_without_ticket=true
+GET  /api/v1/attendance/events/{event_id}/roster/{registration_id}
+```
+
+Payload scan:
+
+```json
+{"qr_token":"token-from-ticket","event_id":"uuid","gate_name":"Main Gate","device_id":"tablet-01"}
+```
+
+Response:
+
+```json
+{
+  "check_in": {
+    "id":"uuid",
+    "ticket_id":"uuid",
+    "event_id":"uuid",
+    "check_in_type":"qr",
+    "check_in_at":"2026-08-22T10:00:00Z",
+    "check_in_by":"uuid",
+    "gate_name":"Main Gate",
+    "device_id":"tablet-01",
+    "status":"success",
+    "notes":null
+  },
+  "registrant": {
+    "registration_id":"uuid",
+    "event_id":"uuid",
+    "registration_number":"REG-....",
+    "registration_status":"confirmed",
+    "participant_id":"uuid",
+    "participant_name":"Nama Peserta",
+    "organization_name":"Nama organisasi",
+    "ticket_id":"uuid",
+    "ticket_number":"TIX-....",
+    "is_checked_in":true
+  }
+}
+```
+
+`GET /api/v1/attendance/events/{event_id}/report` mengembalikan daftar registrasi
+yang sudah terdaftar (kecuali status canceled) + status hadir, lengkap dengan
+`summary` dan `attendance_rate`. Ini cocok untuk dashboard panitia agar langsung
+mengetahui siapa yang sudah hadir, sudah terdaftar tapi belum scan, dan siapa yang
+belum punya tiket (ketika `include_without_ticket=true`).  
+Export CSV disarankan dilakukan dari sisi frontend agar bisa mengikuti format tampilan
+yang dipilih panitia.
+
+`GET /api/v1/attendance/events/{event_id}/roster/{registration_id}` digunakan untuk
+detail satu registran, misalnya untuk pengecekan cepat saat scanner menemukan konflik
+atau data belum sinkron.
+
 ## 15. Organizer/admin
 
 Role admin/organizer:

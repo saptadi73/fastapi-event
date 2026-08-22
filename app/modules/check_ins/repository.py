@@ -6,21 +6,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.modules.check_ins.models import CheckIn
+from app.modules.registrations.models import Registration
 from app.modules.tickets.models import QRToken, Ticket
 from app.modules.tickets.repository import TicketRepository
 
 
 class CheckInRepository:
     @staticmethod
-    async def get_qr_ticket_by_token(session: AsyncSession, qr_token: str) -> Ticket:
-        stmt = select(QRToken).where(QRToken.token_hash == qr_token, QRToken.is_active == True)
+    async def get_qr_ticket_by_token(
+        session: AsyncSession,
+        qr_token: str,
+        event_id: UUID | None = None,
+    ) -> Ticket:
+        stmt = (
+            select(Ticket)
+            .join(QRToken, QRToken.ticket_id == Ticket.id)
+            .join(Registration, Registration.id == Ticket.registration_id)
+            .where(QRToken.token_hash == qr_token, QRToken.is_active == True)
+        )
+        if event_id is not None:
+            stmt = stmt.where(Registration.event_id == event_id)
         result = await session.execute(stmt)
-        qr = result.scalar_one_or_none()
-        if not qr:
-            raise NotFoundException(code="QR_NOT_FOUND", message="QR token tidak valid")
-        ticket = await TicketRepository.get_by_ticket_id(session, qr.ticket_id)
+        ticket = result.scalar_one_or_none()
         if not ticket:
-            raise NotFoundException(code="TICKET_NOT_FOUND", message="Ticket tidak ditemukan")
+            raise NotFoundException(code="QR_NOT_FOUND", message="QR token tidak valid")
         return ticket
 
     @staticmethod

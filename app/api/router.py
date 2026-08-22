@@ -4,6 +4,7 @@ from app.modules.events import routes as event_routes
 from app.modules.health import routes as health_routes
 from app.modules.identity import routes as identity_routes
 from app.modules.check_ins import routes as checkin_routes
+from app.modules.attendance import routes as attendance_routes
 from app.modules.participants import routes as participant_routes
 from app.modules.payments import routes as payment_routes
 from app.modules.speakers import routes as speaker_routes
@@ -24,6 +25,7 @@ router.include_router(identity_routes.router)
 router.include_router(event_routes.router, prefix="/events", tags=["events"])
 router.include_router(participant_routes.router, tags=["participants"])
 router.include_router(checkin_routes.router)
+router.include_router(attendance_routes.router)
 router.include_router(payment_routes.router)
 router.include_router(speaker_routes.router)
 router.include_router(session_routes.router)
