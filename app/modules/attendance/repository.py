@@ -4,9 +4,10 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
+from app.modules.check_ins.models import CheckIn
 from app.modules.participants.models import ParticipantProfile
 from app.modules.registrations.models import Registration, RegistrationStatus
-from app.modules.tickets.models import CheckIn, Ticket
+from app.modules.tickets.models import Ticket
 
 
 class AttendanceRepository:
