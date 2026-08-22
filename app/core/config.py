@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     EMAIL_SMTP_PORT: int = 465
     EMAIL_SMTP_USE_SSL: bool = True
     EMAIL_SMTP_USE_TLS: bool = False
-    EMAIL_SMTP_USERNAME: str = "info@iwbif.id"
+    EMAIL_SMTP_USERNAME: str = "event@iwbif.id"
     EMAIL_SMTP_PASSWORD: str = ""
-    EMAIL_FROM_ADDRESS: str = "info@iwbif.id"
+    EMAIL_FROM_ADDRESS: str = "event@iwbif.id"
     EMAIL_FROM_NAME: str = "IWBIF 2026"
     FRONTEND_LOGIN_URL: str = "http://localhost:3000/login"
 
@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     DOKU_NOTIFICATION_PATH: str = "/api/v1/webhooks/doku"
     DOKU_NOTIFICATION_BASE_URL: str = ""
     DOKU_CALLBACK_URL: str = "http://localhost:3000/payment/result"
+
+    # Midtrans Snap. Keep SERVER_KEY in the deployment secret store only.
+    MIDTRANS_SERVER_KEY: str = ""
+    MIDTRANS_CLIENT_KEY: str = ""
+    MIDTRANS_IS_PRODUCTION: bool = False
+    MIDTRANS_PAYMENT_DUE_MINUTES: int = 60
+    MIDTRANS_CALLBACK_URL: str = "http://localhost:3000/payment/result"
 
     # DOKU Direct API (BI-SNAP). Keys are file paths; never commit private keys.
     DOKU_SNAP_PARTNER_ID: str = ""

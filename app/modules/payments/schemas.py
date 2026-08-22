@@ -127,6 +127,10 @@ class DokuCheckoutResponse(BaseModel):
     requires_payment: bool = True
 
 
+class MidtransCheckoutResponse(DokuCheckoutResponse):
+    token: str
+
+
 class OrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

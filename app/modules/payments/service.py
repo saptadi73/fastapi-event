@@ -1,7 +1,7 @@
 import json
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -18,6 +18,7 @@ from app.modules.users.models import User
 from app.core.config import get_settings
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.payments.doku import DokuCheckoutClient, verify_signature
+from app.modules.payments.midtrans import MidtransClient, verify_notification_signature
 from app.modules.payments.doku_snap import DokuSnapClient, ensure_fresh_timestamp, issue_merchant_token, verify_asymmetric_signature, verify_merchant_token, verify_symmetric_signature
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.email_notifications.service import deliver_payment_for_order
@@ -387,7 +388,7 @@ class PaymentService:
                 return schemas.DokuCheckoutResponse(payment_url="", already_paid=True, payment_id=latest_payment.id if latest_payment else None, order_status=latest_order.status, requires_payment=False), latest_order
             if latest_order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
                 raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
-            payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
+            payment = await PaymentRepository.get_payment_by_order(session, latest_order.id, "doku")
         else:
             latest_order = None
             payment = None
@@ -431,14 +432,11 @@ class PaymentService:
             )
 
         if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.DRAFT]:
-            payment = payment or await PaymentRepository.get_payment_by_order(session, latest_order.id)
+            payment = payment or await PaymentRepository.get_payment_by_order(session, latest_order.id, "doku")
             if not payment:
                 payment = await PaymentRepository.create_doku_payment(session, latest_order)
             if payment.provider == "doku" and payment.checkout_url:
                 return (schemas.DokuCheckoutResponse(payment_url=payment.checkout_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True), latest_order)
-            # A pending legacy provider transaction must not be silently reused.
-            if payment.provider != "doku":
-                raise ConflictException("LEGACY_PAYMENT_PENDING", "Batalkan transaksi payment gateway lama sebelum membuat DOKU Checkout")
         else:
             latest_order = await PaymentRepository.create_order(session, registration.id)
             payment = await PaymentRepository.create_doku_payment(session, latest_order)
@@ -495,6 +493,156 @@ class PaymentService:
                 requires_payment=True,
             ), latest_order,
         )
+
+    @staticmethod
+    async def create_midtrans_checkout(
+        session: AsyncSession,
+        payload: schemas.CreateDokuCheckoutRequest,
+        user_id: uuid.UUID,
+    ) -> tuple[schemas.MidtransCheckoutResponse, Order]:
+        registration = None
+        if payload.order_id:
+            order = await PaymentRepository.get_order_for_user(session, payload.order_id, user_id)
+            if not order:
+                raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        else:
+            registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
+            registration = next((row for row in registrations if row.id == payload.registration_id), None)
+            if not registration:
+                raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan untuk akun ini")
+            order = await PaymentRepository.get_latest_order(session, registration.id)
+            if not order or order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT, OrderStatus.PAID}:
+                order = await PaymentRepository.create_order(session, registration.id)
+
+        if order.status == OrderStatus.PAID:
+            paid_payment = await PaymentRepository.get_payment_by_order(session, order.id)
+            return schemas.MidtransCheckoutResponse(
+                payment_url="", token="", already_paid=True,
+                payment_id=paid_payment.id if paid_payment else None,
+                order_status=order.status, requires_payment=False,
+            ), order
+        if order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+            raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
+        if order.currency.upper() != "IDR" or Decimal(str(order.total_amount)) != Decimal(str(order.total_amount)).to_integral_value():
+            raise ValidationException("MIDTRANS_IDR_REQUIRED", "Midtrans memerlukan tagihan IDR tanpa desimal")
+
+        payment = await PaymentRepository.get_payment_by_order(session, order.id, "midtrans")
+        if payment and payment.checkout_url and payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
+            stored = json.loads(payment.raw_response or "{}")
+            token = str(stored.get("token") or "")
+            if token:
+                return schemas.MidtransCheckoutResponse(
+                    payment_url=payment.checkout_url, token=token, expires_at=payment.expired_at,
+                    payment_id=payment.id, order_status=order.status,
+                ), order
+
+        if registration is None and order.registration_id:
+            registration = await session.get(Registration, order.registration_id)
+        participant = await session.get(ParticipantProfile, registration.participant_id) if registration else None
+        user = await session.get(User, participant.user_id) if participant else await session.get(User, user_id)
+        if not user:
+            raise ValidationException("PAYMENT_DATA_INCOMPLETE", "Data pengguna tidak lengkap")
+
+        settings = get_settings()
+        midtrans_order_id = f"{order.order_number}-MT-{uuid.uuid4().hex[:8].upper()}"
+        request_body = {
+            "transaction_details": {
+                "order_id": midtrans_order_id,
+                "gross_amount": int(Decimal(str(order.total_amount))),
+            },
+            "customer_details": {
+                "first_name": (participant.full_name if participant else user.full_name) or user.email,
+                "email": user.email,
+                "phone": user.phone or "",
+            },
+            "expiry": {"unit": "minutes", "duration": settings.MIDTRANS_PAYMENT_DUE_MINUTES},
+            "callbacks": {"finish": settings.MIDTRANS_CALLBACK_URL},
+            "custom_field1": str(order.id),
+            "custom_field2": str(registration.id) if registration else "",
+        }
+        response = await MidtransClient().create_snap_transaction(request_body)
+        token, payment_url = str(response.get("token") or ""), str(response.get("redirect_url") or "")
+        if not token or not payment_url:
+            raise ValidationException("MIDTRANS_PAYMENT_URL_MISSING", "Midtrans tidak mengembalikan token dan payment URL")
+        if not payment:
+            payment = Payment(order_id=order.id, provider="midtrans", gross_amount=order.total_amount, currency=order.currency)
+            session.add(payment)
+        payment.provider_order_id = midtrans_order_id
+        payment.payment_type = "midtrans_snap"
+        payment.checkout_url = payment_url
+        payment.raw_response = json.dumps(response)
+        payment.transaction_status = PaymentStatus.PENDING
+        payment.expired_at = datetime.now(timezone.utc) + timedelta(minutes=settings.MIDTRANS_PAYMENT_DUE_MINUTES)
+        await session.commit()
+        await session.refresh(payment)
+        return schemas.MidtransCheckoutResponse(
+            payment_url=payment_url, token=token, expires_at=payment.expired_at,
+            payment_id=payment.id, order_status=order.status,
+        ), order
+
+    @staticmethod
+    async def handle_midtrans_notification(session: AsyncSession, payload: dict[str, Any]) -> str:
+        settings = get_settings()
+        if not verify_notification_signature(payload, settings.MIDTRANS_SERVER_KEY):
+            raise ValidationException("MIDTRANS_INVALID_SIGNATURE", "Signature notifikasi Midtrans tidak valid")
+        provider_order_id = str(payload.get("order_id") or "")
+        if not provider_order_id:
+            raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "order_id wajib ada")
+
+        # Server-to-server verification prevents a valid-looking callback from
+        # becoming the sole source of truth for money movement.
+        verified = await MidtransClient().transaction_status(provider_order_id)
+        for key in ("order_id", "transaction_status", "gross_amount"):
+            if str(verified.get(key)) != str(payload.get(key)):
+                raise ValidationException("MIDTRANS_STATUS_MISMATCH", "Status notifikasi tidak sesuai API Midtrans")
+
+        payment = await PaymentRepository.get_payment_by_provider_order_id(session, provider_order_id, lock=True, provider="midtrans")
+        if not payment:
+            raise NotFoundException("MIDTRANS_PAYMENT_NOT_FOUND", "Payment Midtrans tidak ditemukan")
+        order = await session.get(Order, payment.order_id, with_for_update=True)
+        if not order:
+            raise NotFoundException("MIDTRANS_ORDER_NOT_FOUND", "Order Midtrans tidak ditemukan")
+        if Decimal(str(verified.get("gross_amount"))) != Decimal(str(order.total_amount)):
+            raise ValidationException("MIDTRANS_AMOUNT_MISMATCH", "Nominal Midtrans tidak sesuai order")
+
+        transaction_status = str(verified.get("transaction_status") or "").lower()
+        fraud_status = str(verified.get("fraud_status") or "").lower()
+        event_id = f"{verified.get('transaction_id') or provider_order_id}:{transaction_status}:{verified.get('status_code')}"
+        if await PaymentRepository.get_webhook_event(session, event_id, "midtrans"):
+            return "already_processed"
+
+        successful = transaction_status == "settlement" or (transaction_status == "capture" and fraud_status == "accept")
+        if successful:
+            order.status = OrderStatus.PAID
+            payment.transaction_status = PaymentStatus.SUCCESS
+            payment.paid_at = datetime.now(timezone.utc)
+            registration = await session.get(Registration, order.registration_id, with_for_update=True) if order.registration_id else None
+            if registration and registration.status != RegistrationStatus.CONFIRMED:
+                registration.status = RegistrationStatus.PAID
+        elif transaction_status in {"deny", "cancel", "failure"}:
+            payment.transaction_status = PaymentStatus.FAILED
+        elif transaction_status == "expire":
+            payment.transaction_status = PaymentStatus.EXPIRED
+            payment.expired_at = datetime.now(timezone.utc)
+        elif transaction_status in {"refund", "partial_refund"}:
+            payment.transaction_status = PaymentStatus.REFUNDED
+        else:
+            payment.transaction_status = PaymentStatus.PENDING
+
+        payment.provider_transaction_id = str(verified.get("transaction_id") or "") or None
+        payment.payment_type = str(verified.get("payment_type") or payment.payment_type)
+        payment.channel_code = str(verified.get("bank") or verified.get("payment_type") or "") or None
+        payment.fraud_status = fraud_status or None
+        safe_payload = {key: value for key, value in verified.items() if key != "signature_key"}
+        payment.raw_response = json.dumps(safe_payload)
+        session.add(PaymentWebhookEvent(
+            payment_id=payment.id, provider="midtrans", request_id=event_id,
+            event_status=transaction_status.upper(), payload=safe_payload,
+        ))
+        await session.commit()
+        if successful:
+            asyncio.create_task(deliver_payment_for_order(order.id))
+        return payment.transaction_status
 
     @staticmethod
     async def get_payment(session: AsyncSession, payment_id: uuid.UUID, user_id: uuid.UUID):
@@ -641,7 +789,7 @@ class PaymentService:
         notified_amount = Decimal(str(order_data.get("amount")))
         if notified_amount != Decimal(str(order.total_amount)):
             raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal notifikasi DOKU tidak sesuai order")
-        payment = await PaymentRepository.get_payment_by_order(session, order.id)
+        payment = await PaymentRepository.get_payment_by_order(session, order.id, "doku")
         if not payment or payment.provider != "doku":
             raise NotFoundException("DOKU_PAYMENT_NOT_FOUND", "Payment DOKU tidak ditemukan")
         if status == "SUCCESS":

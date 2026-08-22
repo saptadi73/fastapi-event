@@ -21,6 +21,7 @@ PAYMENT_STATUSES = {
     PaymentStatus.SUCCESS,
     PaymentStatus.FAILED,
     PaymentStatus.EXPIRED,
+    PaymentStatus.REFUNDED,
 }
 
 
@@ -39,6 +40,7 @@ class PaymentReportingService:
         status: str | None = None,
         channel_code: str | None = None,
         package_id: UUID | None = None,
+        provider: str = "doku",
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
         stmt = (
@@ -78,9 +80,12 @@ class PaymentReportingService:
                 DelegatePackage,
                 DelegatePackage.id == DelegateRegistrationDetail.delegate_package_id,
             )
-            .where(Payment.provider == "doku")
             .order_by(effective_at.desc(), Payment.id.desc())
         )
+        if provider == "doku":
+            stmt = stmt.where(Payment.provider.like("doku%"))
+        else:
+            stmt = stmt.where(Payment.provider == provider)
         if event_id:
             stmt = stmt.where(Registration.event_id == event_id)
         if date_from:

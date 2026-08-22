@@ -149,6 +149,29 @@ async def create_doku_checkout(
     )
 
 
+@router.post("/payments/midtrans/checkout", summary="Create Midtrans Snap payment")
+async def create_midtrans_checkout(
+    request: Request,
+    payload: schemas.CreateDokuCheckoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    data, order = await PaymentService.create_midtrans_checkout(db, payload, current_user.id)
+    message = "Midtrans Snap berhasil dibuat" if data.requires_payment else "Anda sudah melakukan pembayaran"
+    return success_response(
+        message, data=data.model_dump(),
+        meta={"order_id": str(order.id), "order_number": order.order_number}, request=request,
+    )
+
+
+@router.get("/payments/midtrans/return", summary="Midtrans browser return landing")
+async def midtrans_browser_return(request: Request):
+    return success_response(
+        "Kembali dari Midtrans. Periksa status pembayaran melalui order atau invoice.",
+        data={"payment_status_source": "midtrans_notification"}, request=request,
+    )
+
+
 @router.get("/payments/doku/return", summary="DOKU browser return landing")
 async def doku_browser_return(request: Request):
     """Browser landing only; notification remains the payment source of truth."""
@@ -246,6 +269,7 @@ async def _payment_report_rows(
     status: str | None,
     channel_code: str | None,
     package_id: uuid.UUID | None,
+    provider: str = "doku",
 ):
     if date_from and date_to and date_from > date_to:
         raise ValidationException("INVALID_REPORT_PERIOD", "date_from tidak boleh sesudah date_to")
@@ -260,6 +284,48 @@ async def _payment_report_rows(
         status=normalized_status,
         channel_code=channel_code,
         package_id=package_id,
+        provider=provider,
+    )
+
+
+@router.get("/admin/reports/payments/midtrans", summary="Midtrans payment and revenue report")
+async def admin_midtrans_payment_report(
+    request: Request,
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "midtrans")
+    return success_response(
+        "Laporan pembayaran Midtrans berhasil diambil",
+        data=PaymentReportingService.build_report(rows, limit=limit, offset=offset),
+        meta={"total": len(rows), "limit": limit, "offset": offset}, request=request,
+    )
+
+
+@router.get("/admin/reports/payments/midtrans.csv", summary="Export Midtrans payment report as CSV")
+async def admin_midtrans_payment_report_csv(
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "midtrans")
+    filename = f"iwbif-midtrans-payments-{datetime.now().date().isoformat()}.csv"
+    return Response(
+        content=PaymentReportingService.csv(rows), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -315,6 +381,16 @@ async def doku_notification(
     body = await request.body()
     result = await PaymentService.handle_doku_notification(db, body, dict(request.headers))
     return success_response("Notifikasi DOKU diproses", data={"result": result}, request=request)
+
+
+@router.post("/webhooks/midtrans", summary="Midtrans payment notification")
+async def midtrans_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
+    result = await PaymentService.handle_midtrans_notification(db, payload)
+    return success_response("Notifikasi Midtrans diproses", data={"result": result}, request=request)
 
 
 @router.post("/doku/snap/authorization/v1/access-token/b2b", summary="Issue B2B token for DOKU SNAP callback")

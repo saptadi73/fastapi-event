@@ -101,8 +101,11 @@ class PaymentRepository:
         return order
 
     @staticmethod
-    async def get_payment_by_order(session: AsyncSession, order_id: uuid.UUID) -> Payment | None:
-        stmt = select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc())
+    async def get_payment_by_order(session: AsyncSession, order_id: uuid.UUID, provider: str | None = None) -> Payment | None:
+        stmt = select(Payment).where(Payment.order_id == order_id)
+        if provider:
+            stmt = stmt.where(Payment.provider == provider)
+        stmt = stmt.order_by(Payment.created_at.desc(), Payment.id.desc())
         result = await session.execute(stmt)
         return result.scalars().first()
 
@@ -114,8 +117,10 @@ class PaymentRepository:
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
-    async def get_payment_by_provider_order_id(session: AsyncSession, provider_order_id: str, lock: bool = False) -> Payment | None:
+    async def get_payment_by_provider_order_id(session: AsyncSession, provider_order_id: str, lock: bool = False, provider: str | None = None) -> Payment | None:
         stmt = select(Payment).where(Payment.provider_order_id == provider_order_id)
+        if provider:
+            stmt = stmt.where(Payment.provider == provider)
         if lock:
             stmt = stmt.with_for_update()
         return (await session.execute(stmt)).scalar_one_or_none()
