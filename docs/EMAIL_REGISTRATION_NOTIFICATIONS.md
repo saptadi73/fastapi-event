@@ -40,3 +40,25 @@ password melalui secret manager atau environment deployment lalu restart backend
 
 Jika SMTP gagal, akun tetap tersimpan dan backend mencatat error tanpa
 mengembalikan password atau credential ke response API.
+
+## Template notifikasi yang dikelola admin
+
+Setiap event memiliki template yang dapat diaktifkan/dinonaktifkan serta diubah
+subjek dan isinya oleh admin. Template menggunakan variabel dengan format
+`{{ variable_name }}`. Daftar variabel yang diizinkan dikembalikan pada field
+`available_variables` agar frontend admin dapat menampilkannya.
+
+Endpoint admin:
+
+- `GET /api/v1/admin/events/{event_id}/email-notifications`
+- `PUT /api/v1/admin/events/{event_id}/email-notifications/{trigger}`
+- `POST /api/v1/admin/events/{event_id}/email-notifications/{trigger}/preview`
+- `POST /api/v1/admin/events/{event_id}/email-notifications/{trigger}/test-send`
+- `GET /api/v1/admin/events/{event_id}/email-notifications/logs/history`
+
+Trigger yang tersedia meliputi registrasi dikirim, pemilihan paket delegate dan
+exhibitor, konfirmasi pembayaran, penyimpanan profil business matching, serta
+perubahan meeting (requested, accepted, confirmed, declined, cancelled, dan
+reschedule requested). Pengiriman dilakukan setelah transaksi utama berhasil;
+kegagalan email dicatat di `email_notification_logs` dan tidak membatalkan
+registrasi atau pembayaran.

@@ -7,7 +7,7 @@ from app.modules.users import schemas as user_schemas
 from app.modules.identity import schemas
 from app.modules.users.service import UserService
 from app.support.responses import success_response
-from app.core.email import send_registration_confirmation
+from app.modules.email_notifications.service import deliver_account_registration
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -60,7 +60,7 @@ async def register(
     db: AsyncSession = Depends(get_db_session),
 ):
     user, access_token, refresh_token = await UserService.register(db, payload)
-    background_tasks.add_task(send_registration_confirmation, user.email)
+    background_tasks.add_task(deliver_account_registration, user.id)
     return success_response(
         "Registrasi akun berhasil",
         data={

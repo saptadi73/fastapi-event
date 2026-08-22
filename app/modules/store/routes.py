@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +8,9 @@ from app.core.dependencies import get_current_user, get_db_session, require_admi
 from app.modules.payments.models import Order
 from app.modules.store import schemas
 from app.modules.store.models import Product
+from app.modules.store.models import OrderItem
+from app.modules.events.models import Event
+from app.modules.email_notifications.service import deliver_to_user
 from app.modules.store.service import StoreService
 from app.modules.users.models import User
 from app.support.responses import success_response
@@ -75,6 +78,10 @@ async def remove_cart_item(event_id: UUID, product_id: UUID, request: Request, u
 
 
 @router.post("/events/{event_id}/checkout")
-async def checkout(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+async def checkout(event_id: UUID, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     order, item_count = await StoreService.checkout(db, user.id, event_id)
+    event = await db.get(Event, event_id)
+    items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id, OrderItem.product_type == "exhibitor"))).scalars().all()
+    for item in items:
+        background_tasks.add_task(deliver_to_user, event_id, "exhibitor_package_selected", user.id, {"event_name": event.name, "package_name": item.product_name, "package_code": item.product_code, "amount": item.line_total, "currency": item.currency}, "order", order.id)
     return success_response("Order berhasil dibuat dan menunggu pembayaran", schemas.CheckoutRead(order_id=order.id, order_number=order.order_number, total_amount=float(order.total_amount), currency=order.currency, status=order.status, item_count=item_count, created_at=order.created_at), request=request)

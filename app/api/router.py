@@ -15,6 +15,7 @@ from app.modules.iwbif import routes as iwbif_routes
 from app.modules.store import routes as store_routes
 from app.modules.admin_content import routes as admin_content_routes
 from app.modules.users import admin_routes as user_admin_routes
+from app.modules.email_notifications import routes as email_notification_routes
 
 router = APIRouter()
 
@@ -33,3 +34,4 @@ router.include_router(iwbif_routes.router, tags=["iwbif-2026"])
 router.include_router(store_routes.router)
 router.include_router(admin_content_routes.router)
 router.include_router(user_admin_routes.router)
+router.include_router(email_notification_routes.router)

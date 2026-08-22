@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from app.core.exceptions import AppException, ValidationException
 from app.core.config import get_settings
 from app.modules.payments.models import PaymentChannel
 from app.core.exceptions import NotFoundException
+from app.modules.email_notifications.service import deliver_payment_for_order
 
 router = APIRouter(tags=["payments"])
 logger = logging.getLogger(__name__)
@@ -60,8 +61,9 @@ async def admin_delete_payment_channel(request: Request, channel_id: uuid.UUID, 
 
 
 @router.post("/admin/orders/{order_id}/confirm-manual-payment", summary="Confirm manual bank transfer payment")
-async def confirm_manual_payment(order_id: uuid.UUID, payload: schemas.ManualPaymentConfirmRequest, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+async def confirm_manual_payment(order_id: uuid.UUID, payload: schemas.ManualPaymentConfirmRequest, request: Request, background_tasks: BackgroundTasks, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
     order, payment = await PaymentService.confirm_manual_payment(db, order_id, payload, admin.id)
+    background_tasks.add_task(deliver_payment_for_order, order.id)
     return success_response("Pembayaran transfer manual berhasil dikonfirmasi", data={"order": schemas.OrderRead.model_validate(order), "payment": schemas.PaymentRead.model_validate(payment)}, request=request)
 
 

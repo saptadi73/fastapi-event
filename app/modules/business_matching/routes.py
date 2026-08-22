@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user, get_db_session
@@ -14,6 +14,9 @@ from .models import ConversationParticipant, MatchingSession, Meeting, MeetingSl
 from .repository import BusinessMatchingRepository as Repo
 from .service import BusinessMatchingService as Service
 from .realtime import conversation_hub
+from app.modules.email_notifications.service import deliver_meeting_update, deliver_to_user
+from app.modules.participants.models import ParticipantProfile
+from app.modules.events.models import Event
 
 router = APIRouter()
 
@@ -22,8 +25,10 @@ async def get_profile(event_id: UUID, request: Request, user: User = Depends(get
     return success_response("Profil business matching ditemukan", schemas.ProfileRead.model_validate(await Service.get_profile(db, user.id, event_id)), request=request)
 
 @router.put("/events/{event_id}/business-matching/profile")
-async def put_profile(event_id: UUID, payload: schemas.ProfileWrite, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    return success_response("Profil business matching berhasil disimpan", schemas.ProfileRead.model_validate(await Service.upsert_profile(db, user.id, event_id, payload)), request=request)
+async def put_profile(event_id: UUID, payload: schemas.ProfileWrite, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    row = await Service.upsert_profile(db, user.id, event_id, payload); event = await db.get(Event, event_id)
+    background_tasks.add_task(deliver_to_user, event_id, "business_matching_profile_saved", user.id, {"event_name": event.name}, "business_matching_profile", row.id)
+    return success_response("Profil business matching berhasil disimpan", schemas.ProfileRead.model_validate(row), request=request)
 
 async def _discover(event_id, user, db, recommendations, **filters): return await Service.discover(db, user.id, event_id, filters, recommendations)
 
@@ -119,8 +124,12 @@ async def conversation_websocket(websocket: WebSocket, conversation_id: UUID):
         await conversation_hub.disconnect(conversation_id, websocket)
 
 @router.post("/events/{event_id}/meetings", status_code=201)
-async def create_meeting(event_id: UUID, payload: schemas.MeetingCreate, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    return success_response("Meeting request berhasil dibuat", schemas.MeetingRead.model_validate(await Service.create_meeting(db, user.id, event_id, payload)), request=request)
+async def create_meeting(event_id: UUID, payload: schemas.MeetingCreate, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    actor = await Service.context(db, user.id, event_id); target = await db.get(ParticipantProfile, payload.recipient_participant_id)
+    row = await Service.create_meeting(db, user.id, event_id, payload)
+    if target:
+        background_tasks.add_task(deliver_meeting_update, row.id, "meeting_requested", target.user_id, actor.id)
+    return success_response("Meeting request berhasil dibuat", schemas.MeetingRead.model_validate(row), request=request)
 
 @router.get("/events/{event_id}/meetings")
 async def meetings(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
@@ -135,16 +144,28 @@ async def meeting(meeting_id: UUID, request: Request, user: User = Depends(get_c
     return success_response("Meeting ditemukan", schemas.MeetingRead.model_validate(row), request=request)
 
 def command_route(command):
-    async def endpoint(meeting_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-        return success_response("Status meeting berhasil diubah", schemas.MeetingRead.model_validate(await Service.transition(db, user.id, meeting_id, command)), request=request)
+    async def endpoint(meeting_id: UUID, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+        actor = await Service.context(db, user.id); meeting = await Repo.meeting(db, meeting_id)
+        target_id = meeting.recipient_participant_id if actor.id == meeting.requester_participant_id else meeting.requester_participant_id
+        target = await db.get(ParticipantProfile, target_id)
+        row = await Service.transition(db, user.id, meeting_id, command)
+        trigger = {"accept": "meeting_accepted", "decline": "meeting_declined", "request-reschedule": "meeting_reschedule_requested", "cancel": "meeting_cancelled"}.get(command)
+        if trigger and target:
+            background_tasks.add_task(deliver_meeting_update, row.id, trigger, target.user_id, actor.id)
+        return success_response("Status meeting berhasil diubah", schemas.MeetingRead.model_validate(row), request=request)
     return endpoint
 
 for _command in ("accept", "decline", "request-reschedule", "cancel", "complete"):
     router.add_api_route(f"/meetings/{{meeting_id}}/{_command}", command_route(_command), methods=["POST"])
 
 @router.post("/meetings/{meeting_id}/confirm")
-async def confirm(meeting_id: UUID, payload: schemas.MeetingConfirm, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    return success_response("Meeting berhasil dikonfirmasi", schemas.MeetingRead.model_validate(await Service.transition(db, user.id, meeting_id, "confirm", payload)), request=request)
+async def confirm(meeting_id: UUID, payload: schemas.MeetingConfirm, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    actor = await Service.context(db, user.id); meeting = await Repo.meeting(db, meeting_id)
+    target_id = meeting.recipient_participant_id if actor.id == meeting.requester_participant_id else meeting.requester_participant_id; target = await db.get(ParticipantProfile, target_id)
+    row = await Service.transition(db, user.id, meeting_id, "confirm", payload)
+    if target:
+        background_tasks.add_task(deliver_meeting_update, row.id, "meeting_confirmed", target.user_id, actor.id)
+    return success_response("Meeting berhasil dikonfirmasi", schemas.MeetingRead.model_validate(row), request=request)
 
 @router.get("/events/{event_id}/matching-sessions")
 async def sessions(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):

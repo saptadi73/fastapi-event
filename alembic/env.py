@@ -15,6 +15,7 @@ from app.modules.tickets.models import Ticket, QRToken
 from app.modules.payments.models import Order, Payment, PaymentWebhookEvent, DirectDebitBinding, PaymentChannel
 from app.modules.users.models import User
 from app.modules.business_matching import models as business_matching_models
+from app.modules.email_notifications import models as email_notification_models
 from app.modules.iwbif import models as iwbif_models
 from app.modules.admin_content import models as admin_content_models
 

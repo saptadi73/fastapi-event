@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,8 @@ from app.modules.business_matching.models import BusinessMatchingProfile
 from app.modules.participants.models import ParticipantProfile
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.users.models import User
+from app.modules.events.models import Event
+from app.modules.email_notifications.service import deliver_to_user
 from app.support.responses import success_response
 from . import schemas
 from .constants import *
@@ -79,8 +81,11 @@ for _model, _write, _read, _segment, _label in [
     router.add_api_route(f"/admin/events/{{event_id}}/{_segment}/{{item_id}}", _delete, methods=["DELETE"], response_model=None)
 
 @router.post("/events/{event_id}/registrations", status_code=201)
-async def create_registration(event_id: UUID, payload: schemas.DelegateRegistrationWrite, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    reg = await IwbifService.create_registration(db, event_id, user.id, payload); return success_response("Draft registrasi IWBIF berhasil dibuat", await IwbifService.read_registration(db, reg.id, user.id), request=request)
+async def create_registration(event_id: UUID, payload: schemas.DelegateRegistrationWrite, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    reg = await IwbifService.create_registration(db, event_id, user.id, payload)
+    package = await db.get(DelegatePackage, payload.delegate_package_id); event = await db.get(Event, event_id)
+    background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": package.name, "package_code": package.code, "amount": package.amount, "currency": package.currency}, "registration", reg.id)
+    return success_response("Draft registrasi IWBIF berhasil dibuat", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
 @router.get("/events/{event_id}/registrations/{registration_id}")
 async def registration(event_id: UUID, registration_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
@@ -94,8 +99,10 @@ async def update_registration(event_id: UUID, registration_id: UUID, payload: sc
     return success_response("Draft registrasi berhasil diperbarui", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
 @router.post("/events/{event_id}/registrations/{registration_id}/submit")
-async def submit(event_id: UUID, registration_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+async def submit(event_id: UUID, registration_id: UUID, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     reg = await IwbifService.submit(db, event_id, registration_id, user.id)
+    event = await db.get(Event, event_id)
+    background_tasks.add_task(deliver_to_user, event_id, "registration_submitted", user.id, {"event_name": event.name, "registration_number": reg.registration_number}, "registration", reg.id)
     return success_response("Registrasi berhasil dikirim untuk verifikasi", {"id": reg.id, "status": reg.status}, request=request)
 
 @router.delete("/events/{event_id}/registrations/{registration_id}")
@@ -170,7 +177,7 @@ async def exhibitor_catalogue(exhibitor_id: UUID, request: Request, file: Upload
 
 @router.post("/registrations/{registration_id}/business-matching-profile", status_code=201)
 @router.patch("/registrations/{registration_id}/business-matching-profile")
-async def matching_profile(registration_id: UUID, payload: schemas.MatchingProfileWrite, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+async def matching_profile(registration_id: UUID, payload: schemas.MatchingProfileWrite, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     reg = await IwbifService.owned_registration(db, registration_id, user.id)
     if reg.status != RegistrationStatus.CONFIRMED: raise HTTPException(403, "Business matching profile is available to confirmed delegates only")
     slots = set((await db.execute(select(BusinessMatchingSlot.id).where(BusinessMatchingSlot.event_id == reg.event_id, BusinessMatchingSlot.is_active.is_(True), BusinessMatchingSlot.id.in_(payload.preferred_slot_ids)))).scalars())
@@ -185,6 +192,8 @@ async def matching_profile(registration_id: UUID, payload: schemas.MatchingProfi
     await db.execute(BusinessMatchingProfileSlot.__table__.delete().where(BusinessMatchingProfileSlot.profile_id == row.id))
     db.add_all(BusinessMatchingProfileSlot(profile_id=row.id, slot_id=slot_id) for slot_id in selected_slot_ids)
     await db.commit(); await db.refresh(row)
+    event = await db.get(Event, reg.event_id)
+    background_tasks.add_task(deliver_to_user, reg.event_id, "business_matching_profile_saved", user.id, {"event_name": event.name}, "business_matching_profile", row.id)
     return success_response("Business matching profile berhasil disimpan", {"id": row.id, "registration_id": row.registration_id}, request=request)
 
 @router.get("/registrations/{registration_id}/business-matching-profile")

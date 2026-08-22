@@ -1,4 +1,5 @@
 import json
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -19,6 +20,7 @@ from app.core.exceptions import ConflictException, NotFoundException, Validation
 from app.modules.payments.doku import DokuCheckoutClient, verify_signature
 from app.modules.payments.doku_snap import DokuSnapClient, ensure_fresh_timestamp, issue_merchant_token, verify_asymmetric_signature, verify_merchant_token, verify_symmetric_signature
 from app.modules.registrations.models import Registration, RegistrationStatus
+from app.modules.email_notifications.service import deliver_payment_for_order
 
 
 class PaymentService:
@@ -313,6 +315,7 @@ class PaymentService:
                 registration.status = RegistrationStatus.PAID
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status="SUCCESS", payload=payload))
             await session.commit()
+            asyncio.create_task(deliver_payment_for_order(order.id))
         return {"responseCode": "2002500", "responseMessage": "Successful", "virtualAccountData": {"partnerServiceId": payload.get("partnerServiceId"), "customerNo": payload.get("customerNo"), "virtualAccountNo": payload.get("virtualAccountNo"), "virtualAccountName": payload.get("virtualAccountName"), "trxId": payload.get("trxId"), "paymentRequestId": payload.get("paymentRequestId"), "paidAmount": payload.get("paidAmount")}}
 
     @staticmethod
@@ -352,6 +355,7 @@ class PaymentService:
         status = str(payload.get("latestTransactionStatus") or payload.get("transactionStatus") or payload.get("status") or "SUCCESS").upper()
         provider = "doku_snap_e_wallet" if e_wallet else "doku_snap_direct_debit"
         if not await PaymentRepository.get_webhook_event(session, external_id, provider):
+            notify_paid = status in {"SUCCESS", "PAID", "00"}
             if status in {"SUCCESS", "PAID", "00"}:
                 order.status, payment.transaction_status, payment.paid_at = OrderStatus.PAID, PaymentStatus.SUCCESS, datetime.now(timezone.utc)
                 registration = await session.get(Registration, order.registration_id, with_for_update=True)
@@ -363,6 +367,8 @@ class PaymentService:
             payment.raw_response = json.dumps(payload)
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status=status, payload=payload))
             await session.commit()
+            if notify_paid:
+                asyncio.create_task(deliver_payment_for_order(order.id))
         return {"responseCode": "2005400", "responseMessage": "Successful", "partnerReferenceNo": reference, "additionalInfo": {}}
     @staticmethod
     async def create_doku_checkout(
@@ -657,4 +663,6 @@ class PaymentService:
         payment.raw_response = json.dumps(payload)
         session.add(PaymentWebhookEvent(payment_id=payment.id, provider="doku", request_id=request_id, event_status=status, payload=payload))
         await session.commit()
+        if status == "SUCCESS":
+            asyncio.create_task(deliver_payment_for_order(order.id))
         return status.lower()
