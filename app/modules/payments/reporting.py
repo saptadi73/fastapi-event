@@ -6,13 +6,15 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.events.models import Event
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
 from app.modules.payments.models import Order, Payment, PaymentStatus
 from app.modules.registrations.models import Registration
+from app.modules.store.models import OrderItem, Product
 
 
 PAYMENT_STATUSES = {
@@ -40,9 +42,40 @@ class PaymentReportingService:
         status: str | None = None,
         channel_code: str | None = None,
         package_id: UUID | None = None,
-        provider: str | None = None,
+        provider: str = "doku",
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
+        store_product = aliased(Product)
+        store_package = aliased(DelegatePackage)
+        purchased_event_id = (
+            select(store_product.event_id)
+            .select_from(OrderItem)
+            .join(store_product, store_product.id == OrderItem.product_id)
+            .where(OrderItem.order_id == Order.id, store_product.product_type == "delegate")
+            .order_by(OrderItem.id)
+            .limit(1)
+            .correlate(Order)
+            .scalar_subquery()
+        )
+        purchased_package_id = (
+            select(store_package.id)
+            .select_from(OrderItem)
+            .join(store_product, store_product.id == OrderItem.product_id)
+            .join(
+                store_package,
+                and_(
+                    store_package.event_id == store_product.event_id,
+                    store_product.code == literal("DELEGATE_") + store_package.code,
+                ),
+            )
+            .where(OrderItem.order_id == Order.id, store_product.product_type == "delegate")
+            .order_by(OrderItem.id)
+            .limit(1)
+            .correlate(Order)
+            .scalar_subquery()
+        )
+        effective_event_id = func.coalesce(Registration.event_id, purchased_event_id)
+        effective_package_id = func.coalesce(DelegateRegistrationDetail.delegate_package_id, purchased_package_id)
         stmt = (
             select(
                 Payment.id.label("payment_id"),
@@ -62,7 +95,7 @@ class PaymentReportingService:
                 Order.status.label("order_status"),
                 Registration.id.label("registration_id"),
                 Registration.registration_number,
-                Registration.event_id,
+                effective_event_id.label("event_id"),
                 Event.name.label("event_name"),
                 DelegateRegistrationDetail.full_name.label("customer_name"),
                 DelegateRegistrationDetail.email.label("customer_email"),
@@ -73,14 +106,14 @@ class PaymentReportingService:
             .join(Order, Payment.order_id == Order.id)
             # Store-first payments can complete before a registration exists.
             .outerjoin(Registration, Order.registration_id == Registration.id)
-            .outerjoin(Event, Registration.event_id == Event.id)
+            .outerjoin(Event, effective_event_id == Event.id)
             .outerjoin(
                 DelegateRegistrationDetail,
                 DelegateRegistrationDetail.registration_id == Registration.id,
             )
             .outerjoin(
                 DelegatePackage,
-                DelegatePackage.id == DelegateRegistrationDetail.delegate_package_id,
+                DelegatePackage.id == effective_package_id,
             )
             .order_by(effective_at.desc(), Payment.id.desc())
         )
@@ -89,7 +122,7 @@ class PaymentReportingService:
         elif provider:
             stmt = stmt.where(Payment.provider == provider)
         if event_id:
-            stmt = stmt.where(Registration.event_id == event_id)
+            stmt = stmt.where(effective_event_id == event_id)
         if date_from:
             stmt = stmt.where(effective_at >= date_from)
         if date_to:
@@ -99,7 +132,7 @@ class PaymentReportingService:
         if channel_code:
             stmt = stmt.where(func.upper(Payment.channel_code) == channel_code.strip().upper())
         if package_id:
-            stmt = stmt.where(DelegatePackage.id == package_id)
+            stmt = stmt.where(effective_package_id == package_id)
 
         result = await session.execute(stmt)
         return [dict(row._mapping) for row in result.all()]

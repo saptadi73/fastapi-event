@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import patch
 
 from app.core.config import Settings
-from app.modules.payments.midtrans import MidtransClient, verify_notification_signature, verify_pay_account_signature
+from app.modules.payments.midtrans import (
+    MidtransClient, normalize_midtrans_channel, verify_notification_signature,
+    verify_pay_account_signature,
+)
 
 
 class MidtransSecurityTests(unittest.TestCase):
@@ -43,6 +46,13 @@ class MidtransSecurityTests(unittest.TestCase):
         self.assertTrue(verify_pay_account_signature(payload, "server-secret"))
         payload["account_status"] = "DISABLED"
         self.assertFalse(verify_pay_account_signature(payload, "server-secret"))
+
+    def test_qris_channel_does_not_use_issuer_bank(self):
+        payload = {"payment_type": "qris", "bank": "bca", "issuer": "bca", "acquirer": "gopay"}
+        self.assertEqual("QRIS", normalize_midtrans_channel(payload))
+
+    def test_virtual_account_channel_uses_bank(self):
+        self.assertEqual("BCA", normalize_midtrans_channel({"payment_type": "bank_transfer", "bank": "bca"}))
 
 
 if __name__ == "__main__":

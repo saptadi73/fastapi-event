@@ -2,6 +2,9 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
+
+from sqlalchemy.dialects import postgresql
 
 from app.modules.payments.reporting import PaymentReportingService
 
@@ -75,6 +78,27 @@ class PaymentReportingTests(unittest.TestCase):
         self.assertIn("10000.0", content)
         self.assertIn("provider_order_id", content)
         self.assertIn("ORD-TEST-MT-ABC12345", content)
+
+
+class PaymentReportingQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_store_order_context_supports_event_and_package_filters(self):
+        session = AsyncMock()
+        result = MagicMock()
+        result.all.return_value = []
+        session.execute.return_value = result
+
+        await PaymentReportingService.rows(
+            session,
+            provider="midtrans",
+            event_id=uuid.uuid4(),
+            package_id=uuid.uuid4(),
+        )
+
+        statement = session.execute.await_args.args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.assertIn("coalesce", sql.lower())
+        self.assertIn("order_items", sql)
+        self.assertIn("products", sql)
 
 
 if __name__ == "__main__":

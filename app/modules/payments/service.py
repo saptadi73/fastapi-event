@@ -18,7 +18,7 @@ from app.modules.users.models import User
 from app.core.config import get_settings
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.payments.doku import DokuCheckoutClient, verify_signature
-from app.modules.payments.midtrans import MidtransClient, verify_notification_signature
+from app.modules.payments.midtrans import MidtransClient, normalize_midtrans_channel, verify_notification_signature
 from app.modules.payments.doku_snap import DokuSnapClient, ensure_fresh_timestamp, issue_merchant_token, verify_asymmetric_signature, verify_merchant_token, verify_symmetric_signature
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.email_notifications.service import deliver_payment_for_order
@@ -664,7 +664,9 @@ class PaymentService:
 
         payment.provider_transaction_id = str(verified.get("transaction_id") or "") or None
         payment.payment_type = str(verified.get("payment_type") or payment.payment_type)
-        payment.channel_code = str(verified.get("bank") or verified.get("payment_type") or "") or None
+        payment.channel_code = normalize_midtrans_channel(verified)
+        payment.gross_amount = Decimal(str(verified.get("gross_amount")))
+        payment.currency = str(verified.get("currency") or order.currency).upper()
         payment.fraud_status = fraud_status or None
         safe_payload = {key: value for key, value in verified.items() if key != "signature_key"}
         payment.raw_response = json.dumps(safe_payload)

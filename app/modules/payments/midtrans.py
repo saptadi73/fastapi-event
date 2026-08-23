@@ -83,3 +83,28 @@ def verify_pay_account_signature(payload: dict[str, Any], server_key: str) -> bo
     value = f"{payload['account_id']}{payload['account_status']}{payload['status_code']}{server_key}"
     expected = hashlib.sha512(value.encode()).hexdigest()
     return hmac.compare_digest(str(payload["signature_key"]), expected)
+
+
+def normalize_midtrans_channel(payload: dict[str, Any]) -> str | None:
+    """Return the customer-facing Midtrans rail, not its issuer/acquirer."""
+    payment_type = str(payload.get("payment_type") or "").strip().lower()
+    if not payment_type:
+        return None
+    fixed = {
+        "qris": "QRIS",
+        "gopay": "GOPAY",
+        "shopeepay": "SHOPEEPAY",
+        "credit_card": "CREDIT_CARD",
+        "echannel": "MANDIRI_BILL",
+        "akulaku": "AKULAKU",
+        "kredivo": "KREDIVO",
+    }
+    if payment_type in fixed:
+        return fixed[payment_type]
+    if payment_type == "bank_transfer":
+        bank = str(payload.get("bank") or "").strip().upper()
+        return bank or "BANK_TRANSFER"
+    if payment_type == "cstore":
+        store = str(payload.get("store") or "").strip().upper()
+        return store or "CSTORE"
+    return payment_type.upper()
