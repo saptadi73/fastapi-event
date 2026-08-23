@@ -1,11 +1,15 @@
 import unittest
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from app.main import app
 from app.modules.business_matching.realtime import ConversationHub
 from app.modules.business_matching.schemas import ConversationRead, MessageRead, NotificationRead
 from app.modules.business_matching.models import MessageType
+from app.modules.business_matching.routes import inbox_unread_count
+from app.modules.business_matching.repository import BusinessMatchingRepository as Repo
 
 
 class FakeWebSocket:
@@ -69,6 +73,25 @@ class MessagingRealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(socket.accepted)
         self.assertEqual([{"type": "new_message"}], socket.events)
         await hub.disconnect(conversation_id, socket)
+
+
+class InboxUnreadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_without_participant_can_read_notification_badge(self):
+        user = SimpleNamespace(id=uuid.uuid4(), role="organizer")
+        request = SimpleNamespace(state=SimpleNamespace(request_id="test-request"))
+        db = AsyncMock()
+
+        with (
+            patch.object(Repo, "participant_for_user", AsyncMock(return_value=None)),
+            patch.object(Repo, "total_unread_messages", AsyncMock()) as message_count,
+            patch.object(Repo, "unread_count", AsyncMock(return_value=4)),
+        ):
+            response = await inbox_unread_count(request=request, event_id=None, user=user, db=db)
+
+        self.assertEqual(0, response["data"]["messages"])
+        self.assertEqual(4, response["data"]["notifications"])
+        self.assertEqual(4, response["data"]["unread_count"])
+        message_count.assert_not_awaited()
 
 
 if __name__ == "__main__":

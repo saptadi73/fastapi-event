@@ -84,8 +84,11 @@ async def unread_messages(request: Request, user: User = Depends(get_current_use
 
 @router.get("/inbox/unread-count")
 async def inbox_unread_count(request: Request, event_id: UUID | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    me = await Service.context(db, user.id)
-    messages_unread = await Repo.total_unread_messages(db, me.id)
+    # Notification inbox is available to every authenticated account, including
+    # admins/organizers that do not have a participant profile. Chat unread is
+    # only applicable when the account is also linked to a participant.
+    me = await Repo.participant_for_user(db, user.id)
+    messages_unread = await Repo.total_unread_messages(db, me.id) if me else 0
     notifications_unread = await Repo.unread_count(db, user.id, event_id=event_id)
     return success_response(
         "Inbox unread count berhasil diambil",
