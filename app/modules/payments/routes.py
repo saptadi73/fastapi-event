@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -15,7 +16,7 @@ from app.modules.payments.doku_snap import DokuSnapClient
 from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
 from app.core.exceptions import AppException, ValidationException
 from app.core.config import get_settings
-from app.modules.payments.models import PaymentChannel
+from app.modules.payments.models import PaymentChannel, PaymentWebhookCapture
 from app.core.exceptions import NotFoundException
 from app.modules.email_notifications.service import deliver_payment_for_order
 
@@ -385,12 +386,48 @@ async def doku_notification(
 
 @router.post("/webhooks/midtrans", summary="Midtrans payment notification")
 async def midtrans_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    body = await request.body()
+    captured_headers = {
+        key.lower(): value
+        for key, value in request.headers.items()
+        if key.lower() in {
+            "content-type", "content-length", "user-agent", "host",
+            "x-forwarded-for", "x-forwarded-proto", "x-request-id",
+        }
+    }
+    capture = PaymentWebhookCapture(
+        provider="midtrans",
+        content_type=request.headers.get("content-type"),
+        headers=captured_headers,
+        raw_body=body.decode("utf-8", errors="replace"),
+    )
+    db.add(capture)
+    await db.commit()
+
     try:
-        payload = await request.json()
-    except ValueError as exc:
-        raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
-    result = await PaymentService.handle_midtrans_notification(db, payload)
-    return success_response("Notifikasi Midtrans diproses", data={"result": result}, request=request)
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("JSON root must be an object")
+        capture.parsed_payload = payload
+        await db.commit()
+        result = await PaymentService.handle_midtrans_notification(db, payload)
+        capture = await db.get(PaymentWebhookCapture, capture.id)
+        capture.processing_status = "processed"
+        capture.processing_result = result
+        capture.processed_at = datetime.now().astimezone()
+        await db.commit()
+        return success_response("Notifikasi Midtrans diproses", data={"result": result}, request=request)
+    except Exception as exc:
+        await db.rollback()
+        capture = await db.get(PaymentWebhookCapture, capture.id)
+        capture.processing_status = "failed"
+        capture.error_code = getattr(exc, "code", exc.__class__.__name__)
+        capture.error_message = str(getattr(exc, "message", exc))[:2000]
+        capture.processed_at = datetime.now().astimezone()
+        await db.commit()
+        if isinstance(exc, ValueError):
+            raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
+        raise
 
 
 @router.post("/doku/snap/authorization/v1/access-token/b2b", summary="Issue B2B token for DOKU SNAP callback")

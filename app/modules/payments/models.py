@@ -81,6 +81,24 @@ class PaymentWebhookEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class PaymentWebhookCapture(Base):
+    """Raw inbound webhook evidence, including requests that fail validation."""
+    __tablename__ = "payment_webhook_captures"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    headers: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    raw_body: Mapped[str] = mapped_column(Text, nullable=False)
+    parsed_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    processing_status: Mapped[str] = mapped_column(String(20), nullable=False, default="received")
+    processing_result: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DirectDebitBinding(Base):
     """Tokenised Direct Debit account binding; never stores account/card numbers."""
     __tablename__ = "direct_debit_bindings"
