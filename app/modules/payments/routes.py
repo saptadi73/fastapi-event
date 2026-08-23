@@ -13,6 +13,7 @@ from app.support.responses import success_response
 from app.modules.payments import schemas
 from app.modules.payments.service import PaymentService
 from app.modules.payments.doku_snap import DokuSnapClient
+from app.modules.payments.midtrans import verify_pay_account_signature
 from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
 from app.core.exceptions import AppException, ValidationException
 from app.core.config import get_settings
@@ -22,6 +23,52 @@ from app.modules.email_notifications.service import deliver_payment_for_order
 
 router = APIRouter(tags=["payments"])
 logger = logging.getLogger(__name__)
+
+_WEBHOOK_CAPTURE_HEADERS = {
+    "content-type", "content-length", "user-agent", "host",
+    "x-forwarded-for", "x-forwarded-proto", "x-request-id",
+}
+
+
+async def _capture_webhook(request: Request, db: AsyncSession, provider: str) -> tuple[bytes, uuid.UUID]:
+    body = await request.body()
+    capture = PaymentWebhookCapture(
+        provider=provider,
+        content_type=request.headers.get("content-type"),
+        headers={key.lower(): value for key, value in request.headers.items() if key.lower() in _WEBHOOK_CAPTURE_HEADERS},
+        raw_body=body.decode("utf-8", errors="replace"),
+    )
+    db.add(capture)
+    await db.commit()
+    return body, capture.id
+
+
+async def _parse_captured_webhook(body: bytes, capture_id: uuid.UUID, db: AsyncSession) -> dict:
+    payload = json.loads(body)
+    if not isinstance(payload, dict):
+        raise ValueError("JSON root must be an object")
+    capture = await db.get(PaymentWebhookCapture, capture_id)
+    capture.parsed_payload = payload
+    await db.commit()
+    return payload
+
+
+async def _complete_webhook_capture(capture_id: uuid.UUID, db: AsyncSession, result: str) -> None:
+    capture = await db.get(PaymentWebhookCapture, capture_id)
+    capture.processing_status = "processed"
+    capture.processing_result = result
+    capture.processed_at = datetime.now().astimezone()
+    await db.commit()
+
+
+async def _fail_webhook_capture(capture_id: uuid.UUID, db: AsyncSession, exc: Exception) -> None:
+    await db.rollback()
+    capture = await db.get(PaymentWebhookCapture, capture_id)
+    capture.processing_status = "failed"
+    capture.error_code = getattr(exc, "code", exc.__class__.__name__)
+    capture.error_message = str(getattr(exc, "message", exc))[:2000]
+    capture.processed_at = datetime.now().astimezone()
+    await db.commit()
 
 
 @router.get("/payments/methods", summary="List active payment methods for frontend")
@@ -386,45 +433,61 @@ async def doku_notification(
 
 @router.post("/webhooks/midtrans", summary="Midtrans payment notification")
 async def midtrans_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
-    body = await request.body()
-    captured_headers = {
-        key.lower(): value
-        for key, value in request.headers.items()
-        if key.lower() in {
-            "content-type", "content-length", "user-agent", "host",
-            "x-forwarded-for", "x-forwarded-proto", "x-request-id",
-        }
-    }
-    capture = PaymentWebhookCapture(
-        provider="midtrans",
-        content_type=request.headers.get("content-type"),
-        headers=captured_headers,
-        raw_body=body.decode("utf-8", errors="replace"),
-    )
-    db.add(capture)
-    await db.commit()
-
+    body, capture_id = await _capture_webhook(request, db, "midtrans")
     try:
-        payload = json.loads(body)
-        if not isinstance(payload, dict):
-            raise ValueError("JSON root must be an object")
-        capture.parsed_payload = payload
-        await db.commit()
+        payload = await _parse_captured_webhook(body, capture_id, db)
         result = await PaymentService.handle_midtrans_notification(db, payload)
-        capture = await db.get(PaymentWebhookCapture, capture.id)
-        capture.processing_status = "processed"
-        capture.processing_result = result
-        capture.processed_at = datetime.now().astimezone()
-        await db.commit()
+        await _complete_webhook_capture(capture_id, db, result)
         return success_response("Notifikasi Midtrans diproses", data={"result": result}, request=request)
     except Exception as exc:
-        await db.rollback()
-        capture = await db.get(PaymentWebhookCapture, capture.id)
-        capture.processing_status = "failed"
-        capture.error_code = getattr(exc, "code", exc.__class__.__name__)
-        capture.error_message = str(getattr(exc, "message", exc))[:2000]
-        capture.processed_at = datetime.now().astimezone()
-        await db.commit()
+        await _fail_webhook_capture(capture_id, db, exc)
+        if isinstance(exc, ValueError):
+            raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
+        raise
+
+
+@router.post("/webhooks/midtrans/recurring", summary="Midtrans recurring/subscription notification")
+async def midtrans_recurring_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    body, capture_id = await _capture_webhook(request, db, "midtrans_recurring")
+    try:
+        payload = await _parse_captured_webhook(body, capture_id, db)
+        subscription = payload.get("subscription") if isinstance(payload.get("subscription"), dict) else payload
+        subscription_id = str(subscription.get("id") or "")
+        status = str(subscription.get("status") or "")
+        if not subscription_id or not status:
+            raise ValidationException(
+                "MIDTRANS_RECURRING_INVALID_PAYLOAD",
+                "Notification recurring tidak memiliki subscription id/status",
+            )
+        # Official Subscription notification examples do not contain a
+        # signature. This inbox acknowledges and audits without mutating orders.
+        result = f"captured:{subscription_id}:{status.lower()}"
+        await _complete_webhook_capture(capture_id, db, result)
+        return success_response("Notifikasi recurring Midtrans diterima", data={"result": result}, request=request)
+    except Exception as exc:
+        await _fail_webhook_capture(capture_id, db, exc)
+        if isinstance(exc, ValueError):
+            raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
+        raise
+
+
+@router.post("/webhooks/midtrans/account-linking", summary="Midtrans GoPay account linking notification")
+async def midtrans_account_linking_notification(request: Request, db: AsyncSession = Depends(get_db_session)):
+    body, capture_id = await _capture_webhook(request, db, "midtrans_account")
+    try:
+        payload = await _parse_captured_webhook(body, capture_id, db)
+        if not verify_pay_account_signature(payload, get_settings().MIDTRANS_SERVER_KEY):
+            raise ValidationException(
+                "MIDTRANS_ACCOUNT_INVALID_SIGNATURE",
+                "Signature notification account linking Midtrans tidak valid",
+            )
+        account_id = str(payload.get("account_id"))
+        account_status = str(payload.get("account_status")).lower()
+        result = f"verified:{account_id}:{account_status}"
+        await _complete_webhook_capture(capture_id, db, result)
+        return success_response("Notifikasi account linking Midtrans diterima", data={"result": result}, request=request)
+    except Exception as exc:
+        await _fail_webhook_capture(capture_id, db, exc)
         if isinstance(exc, ValueError):
             raise ValidationException("MIDTRANS_INVALID_PAYLOAD", "Payload notifikasi Midtrans tidak valid") from exc
         raise

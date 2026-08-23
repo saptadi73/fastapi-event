@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from app.core.config import Settings
-from app.modules.payments.midtrans import MidtransClient, verify_notification_signature
+from app.modules.payments.midtrans import MidtransClient, verify_notification_signature, verify_pay_account_signature
 
 
 class MidtransSecurityTests(unittest.TestCase):
@@ -29,6 +29,20 @@ class MidtransSecurityTests(unittest.TestCase):
         with patch("app.modules.payments.midtrans.get_settings", return_value=Settings(MIDTRANS_IS_PRODUCTION=True)):
             client = MidtransClient()
             self.assertNotIn("sandbox", client.snap_base_url)
+
+    def test_pay_account_signature_uses_account_fields(self):
+        payload = {
+            "account_id": "account-123",
+            "account_status": "ENABLED",
+            "status_code": "200",
+        }
+        payload["signature_key"] = hashlib.sha512(
+            b"account-123ENABLED200server-secret"
+        ).hexdigest()
+
+        self.assertTrue(verify_pay_account_signature(payload, "server-secret"))
+        payload["account_status"] = "DISABLED"
+        self.assertFalse(verify_pay_account_signature(payload, "server-secret"))
 
 
 if __name__ == "__main__":

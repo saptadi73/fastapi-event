@@ -73,3 +73,13 @@ def verify_notification_signature(payload: dict[str, Any], server_key: str) -> b
     value = f"{payload['order_id']}{payload['status_code']}{payload['gross_amount']}{server_key}"
     expected = hashlib.sha512(value.encode()).hexdigest()
     return hmac.compare_digest(str(payload["signature_key"]), expected)
+
+
+def verify_pay_account_signature(payload: dict[str, Any], server_key: str) -> bool:
+    """Verify a Midtrans Pay Account linking/unlinking notification."""
+    required = ("account_id", "account_status", "status_code", "signature_key")
+    if not server_key or not all(payload.get(key) is not None for key in required):
+        return False
+    value = f"{payload['account_id']}{payload['account_status']}{payload['status_code']}{server_key}"
+    expected = hashlib.sha512(value.encode()).hexdigest()
+    return hmac.compare_digest(str(payload["signature_key"]), expected)
