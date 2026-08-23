@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.events.models import Event
@@ -24,6 +24,47 @@ MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
 
 
 class IwbifService:
+    @staticmethod
+    async def resolve_purchased_delegate_package(db, event_id, user_id, requested_package_id=None):
+        rows = (await db.execute(
+            select(Order, Product)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .join(Product, Product.id == OrderItem.product_id)
+            .where(
+                Order.user_id == user_id,
+                Order.registration_id.is_(None),
+                Order.status.in_([OrderStatus.PENDING, OrderStatus.PAID]),
+                Product.event_id == event_id,
+                Product.product_type == "delegate",
+            )
+            .order_by(
+                case((Order.status == OrderStatus.PAID, 0), else_=1),
+                Order.created_at.desc(),
+            )
+        )).all()
+
+        for order, product in rows:
+            raw_package_id = (product.metadata_json or {}).get("delegate_package_id")
+            try:
+                package_id = UUID(str(raw_package_id))
+            except (TypeError, ValueError):
+                continue
+            if requested_package_id and package_id != requested_package_id:
+                continue
+            package = await db.get(DelegatePackage, package_id)
+            if package and package.event_id == event_id:
+                return package, order
+
+        if requested_package_id:
+            raise ValidationException(
+                "DELEGATE_PACKAGE_ORDER_MISMATCH",
+                "Paket delegate tidak sesuai dengan order milik user",
+            )
+        raise ValidationException(
+            "DELEGATE_ORDER_REQUIRED",
+            "Order Delegate pending atau paid diperlukan sebelum mengisi registrasi",
+        )
+
     @staticmethod
     async def account_country(db, user_id) -> str:
         user = await db.get(User, user_id)
@@ -86,8 +127,9 @@ class IwbifService:
     async def create_registration(db: AsyncSession, event_id: UUID, user_id: UUID, payload):
         participant = await IwbifService.resolve_participant(db, user_id, payload.participant_id, full_name=payload.full_name, organization_name=payload.company_organization)
         if not await db.get(Event, event_id): raise NotFoundException("EVENT_NOT_FOUND", "Event tidak ditemukan")
-        package = await db.get(DelegatePackage, payload.delegate_package_id)
-        if not package or package.event_id != event_id or not package.is_active: raise ValidationException("INVALID_DELEGATE_PACKAGE", "Paket delegate tidak valid")
+        package, purchased_order = await IwbifService.resolve_purchased_delegate_package(
+            db, event_id, user_id, payload.delegate_package_id,
+        )
         activity_ids = payload.activity_ids
         valid_activities = set((await db.execute(select(EventActivity.id).where(EventActivity.event_id == event_id, EventActivity.is_active.is_(True), EventActivity.id.in_(activity_ids)))).scalars())
         if valid_activities != set(activity_ids): raise ValidationException("INVALID_ACTIVITY", "Aktivitas event tidak valid")
@@ -96,7 +138,8 @@ class IwbifService:
         registration = Registration(event_id=event_id, participant_id=participant.id, registration_number=f"IWBIF-{uuid.uuid4().hex[:10].upper()}", status=RegistrationStatus.DRAFT)
         db.add(registration); await db.flush()
         company = await IwbifService.upsert_company(db, participant.id, name=payload.company_organization, country=await IwbifService.account_country(db, user_id), address=payload.company_address, website=payload.company_website)
-        data = payload.model_dump(exclude={"participant_id"})
+        data = payload.model_dump(exclude={"participant_id", "delegate_package_id"})
+        data["delegate_package_id"] = package.id
         data["company_website"] = str(data["company_website"]) if data["company_website"] else None
         data["linkedin"] = str(data["linkedin"]) if data["linkedin"] else None
         data["activity_ids"] = [str(x) for x in activity_ids]
@@ -104,22 +147,7 @@ class IwbifService:
         data.update(registration_id=registration.id, company_id=company.id, terms_accepted_at=now, consent_accepted_at=now)
         db.add(DelegateRegistrationDetail(**data)); await db.flush()
         await IwbifService.replace_registration_relations(db, registration.id, payload)
-        purchased_order = (await db.execute(
-            select(Order)
-            .join(OrderItem, OrderItem.order_id == Order.id)
-            .join(Product, Product.id == OrderItem.product_id)
-            .where(
-                Order.user_id == user_id,
-                Order.registration_id.is_(None),
-                Order.status.in_([OrderStatus.PENDING, OrderStatus.PAID]),
-                Product.event_id == event_id,
-                Product.code == f"DELEGATE_{package.code}",
-            )
-            .order_by(Order.created_at.desc())
-            .limit(1)
-        )).scalar_one_or_none()
-        if purchased_order:
-            purchased_order.registration_id = registration.id
+        purchased_order.registration_id = registration.id
         await db.commit(); await db.refresh(registration)
         return registration
 
@@ -175,13 +203,11 @@ class IwbifService:
             raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
         if reg.status != RegistrationStatus.DRAFT: raise ConflictException("REGISTRATION_NOT_EDITABLE", "Hanya draft yang dapat diubah")
         if payload.participant_id and reg.participant_id != payload.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
-        package = await db.get(DelegatePackage, payload.delegate_package_id)
-        if not package or package.event_id != reg.event_id or not package.is_active: raise ValidationException("INVALID_DELEGATE_PACKAGE", "Paket delegate tidak valid")
         valid_activities = set((await db.execute(select(EventActivity.id).where(EventActivity.event_id == reg.event_id, EventActivity.is_active.is_(True), EventActivity.id.in_(payload.activity_ids)))).scalars())
         if valid_activities != set(payload.activity_ids): raise ValidationException("INVALID_ACTIVITY", "Aktivitas event tidak valid")
         detail = await db.get(DelegateRegistrationDetail, reg.id)
         company = await IwbifService.upsert_company(db, reg.participant_id, name=payload.company_organization, country=await IwbifService.account_country(db, user_id), address=payload.company_address, website=payload.company_website)
-        data = payload.model_dump(exclude={"participant_id"})
+        data = payload.model_dump(exclude={"participant_id", "delegate_package_id"})
         data["company_website"] = str(data["company_website"]) if data["company_website"] else None; data["linkedin"] = str(data["linkedin"]) if data["linkedin"] else None; data["activity_ids"] = [str(x) for x in data["activity_ids"]]
         data["company_id"] = company.id
         for key, value in data.items(): setattr(detail, key, value)

@@ -8,7 +8,9 @@ class DelegateRegistrationWrite(BaseModel):
     # Optional for backward compatibility. The backend always resolves the
     # participant from the authenticated user and rejects a mismatched ID.
     participant_id: UUID | None = None
-    delegate_package_id: UUID
+    # Resolved by the backend from the authenticated user's purchased Delegate
+    # order. Kept optional for backward-compatible clients only.
+    delegate_package_id: UUID | None = None
     full_name: str = Field(min_length=2, max_length=255)
     job_title: str = Field(min_length=1, max_length=160)
     company_organization: str = Field(min_length=1, max_length=255)

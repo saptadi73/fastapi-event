@@ -9,6 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.iwbif.service import IwbifService
+from app.modules.iwbif.schemas import DelegateRegistrationWrite
 from app.modules.payments.models import Order
 from app.modules.payments.schemas import CreateDokuCheckoutRequest, OrderRead
 from app.modules.registrations.models import Registration, RegistrationStatus
@@ -49,6 +50,26 @@ class PaymentContractTests(unittest.TestCase):
 
 
 class RegistrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_package_is_resolved_from_owned_delegate_order_metadata(self):
+        event_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        package_id = uuid.uuid4()
+        order = SimpleNamespace(id=uuid.uuid4())
+        product = SimpleNamespace(metadata_json={"delegate_package_id": str(package_id)})
+        package = SimpleNamespace(id=package_id, event_id=event_id)
+        database = AsyncMock()
+        result = MagicMock()
+        result.all.return_value = [(order, product)]
+        database.execute.return_value = result
+        database.get.return_value = package
+
+        resolved_package, resolved_order = await IwbifService.resolve_purchased_delegate_package(
+            database, event_id, user_id,
+        )
+
+        self.assertIs(resolved_package, package)
+        self.assertIs(resolved_order, order)
+
     async def test_submit_rejects_wrong_event_before_database_mutation(self):
         database = AsyncMock()
         registration = SimpleNamespace(event_id=uuid.uuid4())
@@ -95,6 +116,10 @@ class RegistrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RegistrationModelTests(unittest.TestCase):
+    def test_delegate_package_is_not_required_in_registration_payload(self):
+        required = DelegateRegistrationWrite.model_json_schema().get("required", [])
+        self.assertNotIn("delegate_package_id", required)
+
     def test_registration_status_persists_lowercase_values(self):
         status_type = Registration.__table__.c.status.type
         processor = status_type.bind_processor(postgresql.dialect())

@@ -83,7 +83,8 @@ for _model, _write, _read, _segment, _label in [
 @router.post("/events/{event_id}/registrations", status_code=201)
 async def create_registration(event_id: UUID, payload: schemas.DelegateRegistrationWrite, request: Request, background_tasks: BackgroundTasks, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     reg = await IwbifService.create_registration(db, event_id, user.id, payload)
-    package = await db.get(DelegatePackage, payload.delegate_package_id); event = await db.get(Event, event_id)
+    detail = await db.get(DelegateRegistrationDetail, reg.id)
+    package = await db.get(DelegatePackage, detail.delegate_package_id); event = await db.get(Event, event_id)
     background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": package.name, "package_code": package.code, "amount": package.amount, "currency": package.currency}, "registration", reg.id)
     return success_response("Draft registrasi IWBIF berhasil dibuat", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
