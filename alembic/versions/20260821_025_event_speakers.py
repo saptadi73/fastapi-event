@@ -1,7 +1,7 @@
 """add explicit event-speaker relationship
 
 Revision ID: 202608210025
-Revises: 202608190024
+Revises: 202608200001
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = "202608210025"
-down_revision = "202608190024"
+down_revision = "202608200001"
 branch_labels = None
 depends_on = None
 
