@@ -317,7 +317,7 @@ async def _payment_report_rows(
     status: str | None,
     channel_code: str | None,
     package_id: uuid.UUID | None,
-    provider: str = "doku",
+    provider: str | None = None,
 ):
     if date_from and date_to and date_from > date_to:
         raise ValidationException("INVALID_REPORT_PERIOD", "date_from tidak boleh sesudah date_to")
@@ -377,7 +377,7 @@ async def admin_midtrans_payment_report_csv(
     )
 
 
-@router.get("/admin/reports/payments", summary="DOKU payment and revenue report")
+@router.get("/admin/reports/payments", summary="All-provider payment and revenue report")
 async def admin_payment_report(
     request: Request,
     event_id: uuid.UUID | None = Query(default=None),
@@ -386,22 +386,23 @@ async def admin_payment_report(
     status: str | None = Query(default=None),
     channel_code: str | None = Query(default=None),
     package_id: uuid.UUID | None = Query(default=None),
+    provider: str | None = Query(default=None, pattern="^(doku|midtrans)$"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id)
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, provider)
     data = PaymentReportingService.build_report(rows, limit=limit, offset=offset)
     return success_response(
-        "Laporan pembayaran DOKU berhasil diambil",
+        "Laporan pembayaran berhasil diambil",
         data=data,
         meta={"total": len(rows), "limit": limit, "offset": offset},
         request=request,
     )
 
 
-@router.get("/admin/reports/payments.csv", summary="Export DOKU payment report as CSV")
+@router.get("/admin/reports/payments.csv", summary="Export all-provider payment report as CSV")
 async def admin_payment_report_csv(
     event_id: uuid.UUID | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
@@ -409,11 +410,12 @@ async def admin_payment_report_csv(
     status: str | None = Query(default=None),
     channel_code: str | None = Query(default=None),
     package_id: uuid.UUID | None = Query(default=None),
+    provider: str | None = Query(default=None, pattern="^(doku|midtrans)$"),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id)
-    filename = f"iwbif-doku-payments-{datetime.now().date().isoformat()}.csv"
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, provider)
+    filename = f"iwbif-payments-{datetime.now().date().isoformat()}.csv"
     return Response(
         content=PaymentReportingService.csv(rows),
         media_type="text/csv; charset=utf-8",

@@ -40,7 +40,7 @@ class PaymentReportingService:
         status: str | None = None,
         channel_code: str | None = None,
         package_id: UUID | None = None,
-        provider: str = "doku",
+        provider: str | None = None,
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
         stmt = (
@@ -71,8 +71,9 @@ class PaymentReportingService:
                 DelegatePackage.name.label("package_name"),
             )
             .join(Order, Payment.order_id == Order.id)
-            .join(Registration, Order.registration_id == Registration.id)
-            .join(Event, Registration.event_id == Event.id)
+            # Store-first payments can complete before a registration exists.
+            .outerjoin(Registration, Order.registration_id == Registration.id)
+            .outerjoin(Event, Registration.event_id == Event.id)
             .outerjoin(
                 DelegateRegistrationDetail,
                 DelegateRegistrationDetail.registration_id == Registration.id,
@@ -85,7 +86,7 @@ class PaymentReportingService:
         )
         if provider == "doku":
             stmt = stmt.where(Payment.provider.like("doku%"))
-        else:
+        elif provider:
             stmt = stmt.where(Payment.provider == provider)
         if event_id:
             stmt = stmt.where(Registration.event_id == event_id)

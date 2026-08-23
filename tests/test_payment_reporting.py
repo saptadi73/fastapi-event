@@ -37,6 +37,21 @@ def payment_row(status: str, amount: str, channel: str, package_code: str = "PKG
 
 
 class PaymentReportingTests(unittest.TestCase):
+    def test_store_first_payment_without_registration_still_counts(self):
+        row = payment_row("success", "10000.00", "MIDTRANS")
+        for key in (
+            "registration_id", "registration_number", "event_id", "event_name",
+            "customer_name", "customer_email", "package_id", "package_code", "package_name",
+        ):
+            row[key] = None
+
+        report = PaymentReportingService.build_report([row], limit=10, offset=0)
+
+        self.assertEqual(report["summary"]["total_transactions"], 1)
+        self.assertEqual(report["summary"]["successful_transactions"], 1)
+        self.assertEqual(report["summary"]["gross_revenue"], 10000.0)
+        self.assertEqual(report["by_package"][0]["package_name"], "Unassigned")
+
     def test_report_counts_only_success_as_revenue_and_ticket_sale(self):
         rows = [
             payment_row("success", "8000000.00", "BCA"),
