@@ -100,6 +100,15 @@ gagal, ambil ulang cart dan jangan mengasumsikan order telah dibuat.
 
 ## 4. Buat pembayaran DOKU
 
+### Pilihan metode pembayaran di frontend
+
+Sementara halaman pembayaran hanya menampilkan dua pilihan:
+
+- **Manual Bank Transfer**: peserta melihat instruksi transfer; admin/organizer memverifikasi mutasi dan mengonfirmasi dengan `manual_transfer`.
+- **Online Payment**: frontend membuat checkout gateway dari order melalui endpoint di bawah ini.
+
+**Direct QR Code Pay tidak ditampilkan dan tidak boleh dipilih frontend.** URL lama `/dashboard/payment-qr` harus kembali ke halaman pilihan pembayaran.
+
 ```http
 POST /api/v1/payments/doku/checkout
 Content-Type: application/json

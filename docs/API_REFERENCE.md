@@ -1277,13 +1277,13 @@ Content-Type: application/json
 ```
 
 Backend memakai nominal yang tersimpan pada order, membuat payment
-`manual_transfer` atau `manual_qr_code`, dan mengubah status order menjadi
-`paid`. Jika order sudah terhubung ke registration, status registration juga
-menjadi `paid`. Endpoint ini idempoten untuk konfirmasi manual yang sama dan
-menolak order canceled/expired atau order yang sudah dibayar melalui gateway
-lain. Untuk QR direct yang tidak melalui DOKU, kirim
-`"payment_method":"manual_qr_code"` dan isi `transfer_reference` dengan
-referensi transaksi QR.
+`manual_transfer`, dan mengubah status order menjadi `paid`. Jika order sudah
+terhubung ke registration, status registration juga menjadi `paid`. Endpoint
+ini idempoten untuk konfirmasi manual yang sama dan menolak order
+canceled/expired atau order yang sudah dibayar melalui gateway lain.
+
+Frontend saat ini hanya menawarkan **Manual Bank Transfer** dan **Online
+Payment**. `manual_qr_code` tidak dikirim maupun ditampilkan sebagai pilihan UI.
 
 Path item literal untuk GET/PUT/DELETE:
 
