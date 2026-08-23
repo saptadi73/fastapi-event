@@ -152,6 +152,39 @@ terminal atau komponen dilepas.
 | `failed` | Pembayaran gagal | Izinkan payment ulang setelah order baru/valid |
 | `expired` | Pembayaran kedaluwarsa | Izinkan checkout ulang |
 
+Jika status terlihat `pending` sementara gateway mengirim success tapi backend belum
+menandai `success`, jangan ubah UI ke sukses sampai /payments/{payment_id} sudah
+`transaction_status=success` dan `order_status=paid`. Sambil menunggu:
+
+- Tampilkan pesan “Verifikasi admin/pembayaran sedang diproses”.
+- Sisakan tombol “Periksa lagi” untuk memicu ulang polling.
+- Jika user mengkonfirmasi ada mismatch yang berkepanjangan, sarankan admin
+  verifikasi manual lewat workflow admin.
+
+## 5a. Notifikasi admin jika status di payment gateway sudah sukses tapi backend belum sinkron
+
+Skenario ini tetap muncul karena sistem frontend menggunakan status final dari
+backend (`/payments/{payment_id}` / `/orders/{order_id}`). Jika `payment.transaction_status`
+tetap `pending` atau `created` terlalu lama, tampilkan CTA:
+
+- "Verifikasi manual payment"
+- Link ke helpdesk/admin contact
+- Tombol "Periksa lagi" untuk refresh manual
+
+Selain itu, admin/organizer harus memantau dan menangani mismatch melalui panel
+inbox notifikasi:
+
+- Notifikasi tipe: `payment_status_update`
+- Endpoint daftar notifikasi admin:
+  - `GET /api/v1/admin/notifications?event_id=<uuid>`
+- Mark read:
+  - `POST /api/v1/admin/notifications/{id}/read`
+- Aksi manual penyelesaian:
+  - `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment`
+
+Backend akan membuat notifikasi/riwayat yang terkait agar user juga mendapatkan
+catatan status terbaru setelah admin confirm manual.
+
 Khusus Midtrans, keberadaan `provider_order_id` atau
 `provider_transaction_id` tidak mengubah aturan UI di atas. Frontend tetap
 menentukan hasil dari `transaction_status`; ID gateway hanya ditampilkan sebagai

@@ -731,11 +731,75 @@ GET  /api/v1/notifications
 GET  /api/v1/notifications/unread-count
 POST /api/v1/notifications/{notification_id}/read
 POST /api/v1/notifications/read-all
+GET  /api/v1/inbox/unread-count?event_id=<uuid>
+GET  /api/v1/admin/notifications?event_id=<uuid>&request_limit=<100>
+GET  /api/v1/admin/notifications/unread-count?event_id=<uuid>
+POST /api/v1/admin/notifications/{notification_id}/read
+POST /api/v1/admin/notifications/read-all?event_id=<uuid>
+```
+
+Contoh response `/api/v1/inbox/unread-count`:
+
+```json
+{
+  "messages": 2,
+  "notifications": 7,
+  "unread_count": 9
+}
 ```
 
 Fields: `id`, `user_id`, `event_id`, `type`, `title`, `body`, `entity_type`,
-`entity_id`, `is_read`, `created_at`, `read_at`. Badge chat memakai
-`/messages/unread-count`; badge notification memakai `/notifications/unread-count`.
+`entity_id`, `is_read`, `created_at`, `read_at`.
+
+`notification.type` untuk Business Matching: `new_message`, `meeting_request`, `meeting_accepted`, `meeting_declined`,
+`meeting_confirmed`, `meeting_reschedule`, `meeting_cancelled`, `meeting_reschedule_requested`,
+`meeting_requested`, dan untuk pembayaran `payment_status_update`.
+
+Contoh response item notifikasi:
+
+```json
+{
+  "id": "uuid-notif",
+  "user_id": "uuid-user",
+  "event_id": "uuid-event",
+  "type": "payment_status_update",
+  "title": "Status pembayaran berubah",
+  "body": "Pembayaran midtrans untuk order IWBIF-2026-001 menjadi success. Ref: TXN-...",
+  "entity_type": "order",
+  "entity_id": "uuid-order",
+  "is_read": false,
+  "created_at": "2026-08-23T10:00:00Z",
+  "read_at": null
+}
+```
+
+Badge chat memakai `/messages/unread-count`; badge notification memakai
+`/notifications/unread-count` untuk user biasa dan `/admin/notifications/unread-count`
+untuk admin/organizer. Untuk ikon inbox keseluruhan, pakai
+`/inbox/unread-count` yang mengembalikan jumlah pesan + notifikasi dalam satu
+response.
+
+### Alur mismatch payment gateway vs backend report
+
+Frontend tidak boleh mengambil status sukses dari:
+
+- redirect halaman gateway,
+- `provider_order_id`,
+- `provider_transaction_id`,
+- token atau status lokal Snap/SDK.
+
+Sumber kebenaran tetap endpoint `GET /api/v1/payments/{payment_id}`.
+
+- Untuk user: jika pending bertahan setelah gateway mengirim success, tampilkan
+  status "Menunggu verifikasi admin/payment gateway".
+- Untuk admin/organizer: notifikasi tipe `payment_status_update` dikirim ke inbox
+  dan dapat digunakan untuk menindaklanjuti verifikasi manual:
+  - `GET /api/v1/admin/notifications?event_id=<uuid>`
+  - `POST /api/v1/admin/notifications/{notification_id}/read`
+  - `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment`
+
+`entity_type` yang umum dipakai pada kasus ini: `order`, `payment`,
+`manual_payment`, `manual_payment_confirmation`, `admin_order`.
 
 ## 13. Payment gateway: DOKU dan Midtrans
 

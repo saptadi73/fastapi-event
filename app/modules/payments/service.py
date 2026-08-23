@@ -22,9 +22,39 @@ from app.modules.payments.midtrans import MidtransClient, verify_notification_si
 from app.modules.payments.doku_snap import DokuSnapClient, ensure_fresh_timestamp, issue_merchant_token, verify_asymmetric_signature, verify_merchant_token, verify_symmetric_signature
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.email_notifications.service import deliver_payment_for_order
+from app.modules.business_matching.models import Notification
 
 
 class PaymentService:
+    @staticmethod
+    async def _admin_user_ids(db: AsyncSession):
+        rows = (await db.execute(select(User.id).where(User.role.in_(["admin", "organizer"]), User.status == "active"))).all()
+        return [row[0] for row in rows]
+
+    @staticmethod
+    async def _notify_payment_status(db: AsyncSession, order: Order, payment: Payment, actor_user_id: uuid.UUID | None = None):
+        if not order.registration_id:
+            return
+        registration = await db.get(Registration, order.registration_id)
+        if not registration:
+            return
+        event_id = registration.event_id
+        payment_reference = payment.provider_transaction_id or payment.provider_order_id or payment.provider_reference_no or ""
+        recipients = [order.user_id]
+        recipients.extend(await PaymentService._admin_user_ids(db))
+        if actor_user_id:
+            recipients = [recipient for recipient in recipients if recipient != actor_user_id]
+        for user_id in dict.fromkeys(recipients):
+            db.add(Notification(
+                user_id=user_id,
+                event_id=event_id,
+                type="payment_status_update",
+                title="Status pembayaran berubah",
+                body=f"Pembayaran {payment.provider or 'provider'} untuk order {order.order_number} menjadi {payment.transaction_status}. Ref: {payment_reference or '-'}",
+                entity_type="order",
+                entity_id=order.id,
+            ))
+
     @staticmethod
     async def confirm_manual_payment(session: AsyncSession, order_id: uuid.UUID, payload: schemas.ManualPaymentConfirmRequest, admin_user_id: uuid.UUID) -> tuple[Order, Payment]:
         order = await session.get(Order, order_id, with_for_update=True)
@@ -64,6 +94,7 @@ class PaymentService:
                 registration.status = RegistrationStatus.PAID
         await session.flush()
         session.add(PaymentWebhookEvent(payment_id=manual_payment.id, provider=payload.payment_method, request_id=f"manual-{uuid.uuid4().hex}", event_status="SUCCESS", payload=confirmation))
+        await PaymentService._notify_payment_status(session, order, manual_payment, admin_user_id)
         await session.commit()
         await session.refresh(manual_payment)
         return order, manual_payment
@@ -314,6 +345,7 @@ class PaymentService:
             registration = await session.get(Registration, order.registration_id, with_for_update=True)
             if registration and registration.status != RegistrationStatus.CONFIRMED:
                 registration.status = RegistrationStatus.PAID
+            await PaymentService._notify_payment_status(session, order, payment)
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status="SUCCESS", payload=payload))
             await session.commit()
             asyncio.create_task(deliver_payment_for_order(order.id))
@@ -364,6 +396,7 @@ class PaymentService:
                     registration.status = RegistrationStatus.PAID
             elif status in {"FAILED", "CANCELLED", "CANCELED"}:
                 order.status, payment.transaction_status = OrderStatus.CANCELED, PaymentStatus.FAILED
+            await PaymentService._notify_payment_status(session, order, payment)
             payment.channel_code = channel_value or channel_key
             payment.raw_response = json.dumps(payload)
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status=status, payload=payload))
@@ -635,6 +668,7 @@ class PaymentService:
         payment.fraud_status = fraud_status or None
         safe_payload = {key: value for key, value in verified.items() if key != "signature_key"}
         payment.raw_response = json.dumps(safe_payload)
+        await PaymentService._notify_payment_status(session, order, payment)
         session.add(PaymentWebhookEvent(
             payment_id=payment.id, provider="midtrans", request_id=event_id,
             event_status=transaction_status.upper(), payload=safe_payload,
@@ -809,6 +843,7 @@ class PaymentService:
         else:
             payment.transaction_status = status.lower()
         payment.raw_response = json.dumps(payload)
+        await PaymentService._notify_payment_status(session, order, payment)
         session.add(PaymentWebhookEvent(payment_id=payment.id, provider="doku", request_id=request_id, event_status=status, payload=payload))
         await session.commit()
         if status == "SUCCESS":

@@ -402,7 +402,19 @@ GET  /api/v1/notifications
 GET  /api/v1/notifications/unread-count
 POST /api/v1/notifications/{id}/read
 POST /api/v1/notifications/read-all
+GET  /api/v1/inbox/unread-count?event_id={event_id}
+GET  /api/v1/admin/notifications?event_id={event_id}&request_limit={request_limit}
+GET  /api/v1/admin/notifications/unread-count?event_id={event_id}
+POST /api/v1/admin/notifications/{id}/read
+POST /api/v1/admin/notifications/read-all?event_id={event_id}
 ```
+
+Untuk webhook pembayaran, update status juga masuk ke pusat notifikasi inbox:
+
+- Midtrans: `payment_status_update` (termasuk sukses/gagal/expired/refund pada webhook)
+- DOKU: `payment_status_update`
+- Notifikasi ini disalurkan ke pemilik order dan semua user role `admin`/`organizer` yang aktif.
+- Isi notifikasi `payment_status_update` menyertakan status terbaru + referensi transaksi (mis. `provider_transaction_id`/`provider_order_id` bila ada), jadi bisa langsung jadi titik awal pengecekan ketika ada pertanyaan pembayaran.
 
 ## 15. Email & Reminder
 

@@ -120,3 +120,24 @@ class MeetingRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    event_id: UUID
+    type: str
+    title: str
+    body: str
+    entity_type: str
+    entity_id: UUID
+    is_read: bool = False
+    created_at: datetime
+    read_at: datetime | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InboxUnreadSummary(BaseModel):
+    messages: int
+    notifications: int
+    unread_count: int

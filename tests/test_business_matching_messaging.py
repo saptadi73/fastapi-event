@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.main import app
 from app.modules.business_matching.realtime import ConversationHub
-from app.modules.business_matching.schemas import ConversationRead, MessageRead
+from app.modules.business_matching.schemas import ConversationRead, MessageRead, NotificationRead
 from app.modules.business_matching.models import MessageType
 
 
@@ -27,12 +27,36 @@ class MessagingContractTests(unittest.TestCase):
         self.assertIn("patch", paths["/api/v1/conversations/{conversation_id}/messages/{message_id}"])
         self.assertIn("delete", paths["/api/v1/conversations/{conversation_id}/messages/{message_id}"])
         self.assertIn("get", paths["/api/v1/messages/unread-count"])
+        self.assertIn("get", paths["/api/v1/inbox/unread-count"])
+        self.assertIn("get", paths["/api/v1/admin/notifications"])
+        self.assertIn("get", paths["/api/v1/admin/notifications/unread-count"])
+        self.assertIn("post", paths["/api/v1/admin/notifications/{notification_id}/read"])
+        self.assertIn("post", paths["/api/v1/admin/notifications/read-all"])
 
     def test_conversation_contract_contains_counterpart_and_last_message(self):
         message = MessageRead(id=uuid.uuid4(), conversation_id=uuid.uuid4(), sender_participant_id=uuid.uuid4(), message_type=MessageType.TEXT, body="Hello", meeting_id=None, reply_to_message_id=None, created_at=datetime.now(timezone.utc))
         value = ConversationRead(id=message.conversation_id, event_id=uuid.uuid4(), status="active", other_participant_id=uuid.uuid4(), other_participant_name="Partner", unread_count=1, last_message=message)
         self.assertEqual(1, value.unread_count)
         self.assertEqual("Hello", value.last_message.body)
+
+    def test_notification_contract_includes_payment_payload_fields(self):
+        payload = NotificationRead(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            event_id=uuid.uuid4(),
+            type="payment_status_update",
+            title="Status pembayaran berubah",
+            body="Pembayaran midtrans untuk order ORD-001 menjadi success",
+            entity_type="order",
+            entity_id=uuid.uuid4(),
+            is_read=False,
+            created_at=datetime.now(timezone.utc),
+            read_at=None,
+        )
+        dumped = payload.model_dump()
+        self.assertEqual("payment_status_update", dumped["type"])
+        self.assertEqual("order", dumped["entity_type"])
+        self.assertIn("user_id", dumped)
 
 
 class MessagingRealtimeTests(unittest.IsolatedAsyncioTestCase):

@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.dependencies import get_current_user, get_db_session
+from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.core.database import AsyncSessionFactory
 from app.core.security import decode_token
 from app.modules.users.models import User
@@ -80,6 +80,22 @@ async def delete_message(conversation_id: UUID, message_id: UUID, request: Reque
 async def unread_messages(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     me = await Service.context(db, user.id)
     return success_response("Unread message count berhasil diambil", {"count": await Repo.total_unread_messages(db, me.id)}, request=request)
+
+
+@router.get("/inbox/unread-count")
+async def inbox_unread_count(request: Request, event_id: UUID | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    me = await Service.context(db, user.id)
+    messages_unread = await Repo.total_unread_messages(db, me.id)
+    notifications_unread = await Repo.unread_count(db, user.id, event_id=event_id)
+    return success_response(
+        "Inbox unread count berhasil diambil",
+        schemas.InboxUnreadSummary(
+            messages=messages_unread,
+            notifications=notifications_unread,
+            unread_count=messages_unread + notifications_unread,
+        ).model_dump(),
+        request=request,
+    )
 
 @router.post("/conversations/{conversation_id}/read")
 async def read(conversation_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
@@ -210,10 +226,17 @@ async def report(event_id: UUID, payload: schemas.ParticipantModeration, request
     return success_response("Laporan participant berhasil dibuat", {"id": row.id, "status": row.status}, request=request)
 
 @router.get("/notifications")
-async def notifications(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)): return success_response("Notifikasi berhasil diambil", await Repo.notifications(db, user.id), request=request)
+async def notifications(request: Request, event_id: UUID | None = None, request_limit: int = Query(default=100, ge=1, le=200), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    rows = await Repo.notifications(db, user.id, event_id=event_id, limit=request_limit)
+    return success_response(
+        "Notifikasi berhasil diambil",
+        [schemas.NotificationRead.model_validate(x).model_dump(mode="json") for x in rows],
+        request=request,
+    )
 
 @router.get("/notifications/unread-count")
-async def unread(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)): return success_response("Unread count berhasil diambil", {"count": await Repo.unread_count(db, user.id)}, request=request)
+async def unread(request: Request, event_id: UUID | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    return success_response("Unread count berhasil diambil", {"count": await Repo.unread_count(db, user.id, event_id=event_id)}, request=request)
 
 @router.post("/notifications/{notification_id}/read")
 async def notification_read(notification_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
@@ -224,3 +247,35 @@ async def notification_read(notification_id: UUID, request: Request, user: User 
 async def read_all(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     from datetime import datetime, timezone
     await db.execute(update(Notification).where(Notification.user_id == user.id, Notification.is_read.is_(False)).values(is_read=True, read_at=datetime.now(timezone.utc))); await db.commit(); return success_response("Semua notifikasi ditandai dibaca", request=request)
+
+
+@router.get("/admin/notifications")
+async def admin_notifications(request: Request, event_id: UUID | None = None, request_limit: int = Query(default=100, ge=1, le=200), admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    rows = await Repo.notifications(db, admin.id, event_id=event_id, limit=request_limit)
+    return success_response(
+        "Notifikasi admin berhasil diambil",
+        [schemas.NotificationRead.model_validate(x).model_dump(mode="json") for x in rows],
+        request=request,
+    )
+
+
+@router.get("/admin/notifications/unread-count")
+async def admin_unread(request: Request, event_id: UUID | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    return success_response("Unread count admin berhasil diambil", {"count": await Repo.unread_count(db, admin.id, event_id=event_id)}, request=request)
+
+
+@router.post("/admin/notifications/{notification_id}/read")
+async def admin_notification_read(notification_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    await db.execute(update(Notification).where(Notification.id == notification_id, Notification.user_id == admin.id).values(is_read=True, read_at=datetime.now(timezone.utc)))
+    await db.commit()
+    return success_response("Notifikasi admin ditandai dibaca", request=request)
+
+
+@router.post("/admin/notifications/read-all")
+async def admin_read_all(request: Request, event_id: UUID | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    q = update(Notification).where(Notification.user_id == admin.id, Notification.is_read.is_(False))
+    if event_id is not None:
+        q = q.where(Notification.event_id == event_id)
+    await db.execute(q.values(is_read=True, read_at=datetime.now(timezone.utc)))
+    await db.commit()
+    return success_response("Semua notifikasi admin ditandai dibaca", request=request)

@@ -101,9 +101,15 @@ class BusinessMatchingRepository:
         return list((await db.execute(select(MeetingResource).join(MeetingVenue).where(MeetingVenue.event_id == event_id, MeetingResource.is_active.is_(True)))).scalars())
 
     @staticmethod
-    async def notifications(db, user_id):
-        return list((await db.execute(select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc()).limit(100))).scalars())
+    async def notifications(db, user_id, event_id=None, limit: int = 100):
+        q = select(Notification).where(Notification.user_id == user_id)
+        if event_id is not None:
+            q = q.where(Notification.event_id == event_id)
+        return list((await db.execute(q.order_by(Notification.created_at.desc()).limit(limit))).scalars())
 
     @staticmethod
-    async def unread_count(db, user_id):
-        return (await db.execute(select(func.count()).select_from(Notification).where(Notification.user_id == user_id, Notification.is_read.is_(False)))).scalar_one()
+    async def unread_count(db, user_id, event_id=None):
+        q = select(func.count()).select_from(Notification).where(Notification.user_id == user_id, Notification.is_read.is_(False))
+        if event_id is not None:
+            q = q.where(Notification.event_id == event_id)
+        return (await db.execute(q)).scalar_one()

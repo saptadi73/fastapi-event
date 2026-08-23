@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.participants.models import ParticipantProfile
+from app.modules.users.models import User
 from . import schemas
 from .models import (AuditLog, BusinessMatchingProfile, Conversation, ConversationParticipant,
     MatchingSession, Meeting, MeetingResource, MeetingSlot, MeetingSlotProposal, MeetingStatus,
@@ -33,6 +34,47 @@ def score_match(source, target):
 
 
 class BusinessMatchingService:
+    ADMIN_ROLES = {"admin", "organizer"}
+
+    @staticmethod
+    async def _admin_user_ids(db: AsyncSession):
+        rows = (await db.execute(select(User.id).where(User.role.in_(BusinessMatchingService.ADMIN_ROLES), User.status == "active"))).all()
+        return [row[0] for row in rows]
+
+    @staticmethod
+    async def _notify(db: AsyncSession, event_id, type: str, title: str, body: str, entity_type: str, entity_id, recipients: list[UUID]):
+        if not recipients:
+            return
+        seen = set()
+        for recipient_id in recipients:
+            if recipient_id is None or recipient_id in seen:
+                continue
+            seen.add(recipient_id)
+            db.add(Notification(
+                user_id=recipient_id,
+                event_id=event_id,
+                type=type,
+                title=title,
+                body=body,
+                entity_type=entity_type,
+                entity_id=entity_id,
+            ))
+
+    @staticmethod
+    async def _notify_with_admins(
+        db: AsyncSession,
+        event_id,
+        type: str,
+        title: str,
+        body: str,
+        entity_type: str,
+        entity_id,
+        primary_recipients: list[UUID] | None = None,
+    ):
+        recipients = list(primary_recipients or [])
+        recipients.extend(await BusinessMatchingService._admin_user_ids(db))
+        await BusinessMatchingService._notify(db, event_id, type, title, body, entity_type, entity_id, recipients)
+
     @staticmethod
     async def context(db, user_id, event_id=None):
         participant = await Repo.participant_for_user(db, user_id)
@@ -96,7 +138,16 @@ class BusinessMatchingService:
         if payload.initial_message:
             db.add(Message(conversation_id=conversation.id, sender_participant_id=me.id, body=payload.initial_message)); conversation.last_message_at = datetime.now(timezone.utc)
             target_user = (await db.execute(select(ParticipantProfile.user_id).where(ParticipantProfile.id == target.participant_id))).scalar_one()
-            db.add(Notification(user_id=target_user, event_id=event_id, type="new_message", title="Pesan baru", body="Anda menerima pesan business matching", entity_type="conversation", entity_id=conversation.id))
+            await BusinessMatchingService._notify_with_admins(
+                db,
+                event_id=event_id,
+                type="new_message",
+                title="Pesan baru",
+                body="Anda menerima pesan business matching",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                primary_recipients=[target_user],
+            )
         await db.commit(); await db.refresh(conversation)
         return conversation
 
@@ -123,7 +174,16 @@ class BusinessMatchingService:
         msg = Message(conversation_id=conversation_id, sender_participant_id=me.id, body=body, reply_to_message_id=payload.reply_to_message_id)
         db.add(msg); conversation.last_message_at = datetime.now(timezone.utc)
         user_id_target = (await db.execute(select(ParticipantProfile.user_id).where(ParticipantProfile.id == other))).scalar_one()
-        db.add(Notification(user_id=user_id_target, event_id=conversation.event_id, type="new_message", title="Pesan baru", body="Anda menerima pesan business matching", entity_type="conversation", entity_id=conversation.id))
+        await BusinessMatchingService._notify_with_admins(
+            db,
+            event_id=conversation.event_id,
+            type="new_message",
+            title="Pesan baru",
+            body="Anda menerima pesan business matching",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            primary_recipients=[user_id_target],
+        )
         await db.commit(); await db.refresh(msg)
         await conversation_hub.broadcast(conversation_id, {"type": "new_message", "conversation_id": str(conversation_id), "message": schemas.MessageRead.model_validate(msg).model_dump(mode="json")})
         return msg
@@ -206,7 +266,16 @@ class BusinessMatchingService:
     async def _event(db, meeting, actor_user_id, event_type, title, message_type):
         recipient_id = meeting.recipient_participant_id if (await Repo.participant_for_user(db, actor_user_id)).id == meeting.requester_participant_id else meeting.requester_participant_id
         target_user = (await db.execute(select(ParticipantProfile.user_id).where(ParticipantProfile.id == recipient_id))).scalar_one()
-        db.add(Notification(user_id=target_user, event_id=meeting.event_id, type=event_type, title=title, body=meeting.topic, entity_type="meeting", entity_id=meeting.id))
+        await BusinessMatchingService._notify_with_admins(
+            db,
+            event_id=meeting.event_id,
+            type=event_type,
+            title=title,
+            body=meeting.topic,
+            entity_type="meeting",
+            entity_id=meeting.id,
+            primary_recipients=[target_user],
+        )
         db.add(AuditLog(event_id=meeting.event_id, actor_user_id=actor_user_id, action=event_type, entity_type="meeting", entity_id=meeting.id, new_values={"status": meeting.status.value}))
         if meeting.conversation_id:
             message = Message(conversation_id=meeting.conversation_id, sender_participant_id=meeting.requester_participant_id, message_type=message_type, body=title, meeting_id=meeting.id)
