@@ -8,7 +8,8 @@ Isi email:
 
 - Konfirmasi akun berhasil terdaftar pada event IWBIF 2026.
 - Link `FRONTEND_LOGIN_URL` untuk login dan melanjutkan pendaftaran.
-- Sender: `info@iwbif.id`.
+- Sender mengikuti `EMAIL_FROM_ADDRESS` dan harus sama dengan mailbox Titan yang
+  dipakai pada `EMAIL_SMTP_USERNAME`.
 
 ## Titan Email SMTP
 
@@ -20,9 +21,9 @@ EMAIL_SMTP_HOST=smtp.titan.email
 EMAIL_SMTP_PORT=465
 EMAIL_SMTP_USE_SSL=true
 EMAIL_SMTP_USE_TLS=false
-EMAIL_SMTP_USERNAME=info@iwbif.id
+EMAIL_SMTP_USERNAME=event@iwbif.id
 EMAIL_SMTP_PASSWORD=<Titan-Mailbox-or-App-Password>
-EMAIL_FROM_ADDRESS=info@iwbif.id
+EMAIL_FROM_ADDRESS=event@iwbif.id
 EMAIL_FROM_NAME=IWBIF 2026
 FRONTEND_LOGIN_URL=https://frontend.example.com/login
 ```
@@ -55,6 +56,20 @@ Endpoint admin:
 - `POST /api/v1/admin/events/{event_id}/email-notifications/{trigger}/preview`
 - `POST /api/v1/admin/events/{event_id}/email-notifications/{trigger}/test-send`
 - `GET /api/v1/admin/events/{event_id}/email-notifications/logs/history`
+
+Endpoint organizer untuk override per akun:
+
+- `GET /api/v1/admin/events/{event_id}/email-notifications/accounts/{user_id}/preferences`
+- `PUT /api/v1/admin/events/{event_id}/email-notifications/accounts/{user_id}/preferences/{trigger}`
+
+Body `PUT` menggunakan `{ "is_enabled": false }` untuk menonaktifkan trigger
+khusus akun tersebut, `{ "is_enabled": true }` untuk mengaktifkan override, dan
+`{ "is_enabled": null }` untuk menghapus override serta kembali mengikuti
+default event. Field respons `global_enabled`, `override_enabled`, dan
+`effective_enabled` membedakan ketiga status tersebut. Template event adalah
+master switch: override akun tidak dapat mengaktifkan pengiriman jika template
+global sedang dinonaktifkan. Setiap perubahan override mencatat organizer pada
+`updated_by`.
 
 Trigger yang tersedia meliputi registrasi dikirim, pemilihan paket delegate dan
 exhibitor, konfirmasi pembayaran, penyimpanan profil business matching, serta

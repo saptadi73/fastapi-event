@@ -1,6 +1,8 @@
 import unittest
 
+from app.modules.email_notifications.schemas import AccountPreferenceRead, AccountPreferenceWrite
 from app.modules.email_notifications.service import DEFAULT_TEMPLATES, TRIGGER_VARIABLES, render
+from uuid import uuid4
 
 
 class EmailNotificationTemplateTests(unittest.TestCase):
@@ -27,3 +29,17 @@ class EmailNotificationTemplateTests(unittest.TestCase):
             "meeting_reschedule_requested",
         }
         self.assertEqual(expected, set(TRIGGER_VARIABLES))
+
+    def test_account_preference_supports_override_and_restore_default(self):
+        self.assertFalse(AccountPreferenceWrite(is_enabled=False).is_enabled)
+        self.assertIsNone(AccountPreferenceWrite(is_enabled=None).is_enabled)
+
+        preference = AccountPreferenceRead(
+            event_id=uuid4(),
+            user_id=uuid4(),
+            trigger="payment_confirmed",
+            global_enabled=True,
+            override_enabled=False,
+            effective_enabled=False,
+        )
+        self.assertFalse(preference.effective_enabled)

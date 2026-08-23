@@ -62,3 +62,19 @@ class LogRead(BaseModel):
     sent_at: datetime | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class AccountPreferenceWrite(BaseModel):
+    # null removes the account override and restores the event default.
+    is_enabled: bool | None = None
+
+
+class AccountPreferenceRead(BaseModel):
+    event_id: UUID
+    user_id: UUID
+    trigger: str
+    global_enabled: bool
+    override_enabled: bool | None
+    effective_enabled: bool
+    updated_by: UUID | None = None
+    updated_at: datetime | None = None

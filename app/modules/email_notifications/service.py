@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import get_settings
 from app.core.database import AsyncSessionFactory
 from app.core.email import _send_message
-from app.modules.email_notifications.models import EmailNotificationLog, EmailNotificationTemplate
+from app.modules.email_notifications.models import EmailNotificationLog, EmailNotificationPreference, EmailNotificationTemplate
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,15 @@ async def deliver(event_id: UUID, trigger: str, recipient: str, variables: dict[
 async def deliver_to_user(event_id: UUID, trigger: str, user_id: UUID, variables: dict[str, object], entity_type: str | None = None, entity_id: UUID | None = None) -> bool:
     async with AsyncSessionFactory() as db:
         user = await db.get(User, user_id)
+        preference = (await db.execute(select(EmailNotificationPreference).where(
+            EmailNotificationPreference.event_id == event_id,
+            EmailNotificationPreference.user_id == user_id,
+            EmailNotificationPreference.trigger == trigger,
+        ))).scalar_one_or_none()
     if not user:
+        return False
+    if preference is not None and not preference.is_enabled:
+        logger.info("Email notification disabled for account; trigger=%s user_id=%s", trigger, user_id)
         return False
     values = {"participant_name": user.full_name or user.email, "login_url": get_settings().FRONTEND_LOGIN_URL, **variables}
     return await deliver(event_id, trigger, user.email, values, entity_type, entity_id)

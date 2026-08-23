@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_db_session, require_admin
 from app.core.exceptions import NotFoundException, ValidationException
 from app.modules.email_notifications import schemas
-from app.modules.email_notifications.models import EmailNotificationLog, EmailNotificationTemplate
+from app.modules.email_notifications.models import EmailNotificationLog, EmailNotificationPreference, EmailNotificationTemplate
 from app.modules.email_notifications.service import TRIGGER_VARIABLES, deliver, ensure_event_templates, render
 from app.modules.users.models import User
 from app.support.responses import success_response
@@ -23,6 +23,79 @@ async def get_template(db: AsyncSession, event_id: UUID, trigger: str) -> EmailN
     if not row:
         raise NotFoundException("EMAIL_TEMPLATE_NOT_FOUND", "Template email tidak ditemukan")
     return row
+
+
+@router.get("/accounts/{user_id}/preferences")
+async def account_preferences(event_id: UUID, user_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    user = await db.get(User, user_id)
+    if not user:
+        raise NotFoundException("USER_NOT_FOUND", "User tidak ditemukan")
+    templates = await ensure_event_templates(db, event_id)
+    overrides = {
+        row.trigger: row
+        for row in (await db.execute(select(EmailNotificationPreference).where(
+            EmailNotificationPreference.event_id == event_id,
+            EmailNotificationPreference.user_id == user_id,
+        ))).scalars().all()
+    }
+    data = []
+    for template in templates:
+        override = overrides.get(template.trigger)
+        override_enabled = override.is_enabled if override else None
+        data.append(schemas.AccountPreferenceRead(
+            event_id=event_id,
+            user_id=user_id,
+            trigger=template.trigger,
+            global_enabled=template.is_enabled,
+            override_enabled=override_enabled,
+            effective_enabled=template.is_enabled and override_enabled is not False,
+            updated_by=override.updated_by if override else None,
+            updated_at=override.updated_at if override else None,
+        ))
+    return success_response("Pengaturan notifikasi akun ditemukan", data, request=request)
+
+
+@router.put("/accounts/{user_id}/preferences/{trigger}")
+async def update_account_preference(event_id: UUID, user_id: UUID, trigger: str, payload: schemas.AccountPreferenceWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    user = await db.get(User, user_id)
+    if not user:
+        raise NotFoundException("USER_NOT_FOUND", "User tidak ditemukan")
+    template = await get_template(db, event_id, trigger)
+    row = (await db.execute(select(EmailNotificationPreference).where(
+        EmailNotificationPreference.event_id == event_id,
+        EmailNotificationPreference.user_id == user_id,
+        EmailNotificationPreference.trigger == trigger,
+    ))).scalar_one_or_none()
+    if payload.is_enabled is None:
+        if row:
+            await db.delete(row)
+        await db.commit()
+        override_enabled = None
+        updated_by = None
+        updated_at = None
+    else:
+        if row is None:
+            row = EmailNotificationPreference(event_id=event_id, user_id=user_id, trigger=trigger, is_enabled=payload.is_enabled, updated_by=admin.id)
+            db.add(row)
+        else:
+            row.is_enabled = payload.is_enabled
+            row.updated_by = admin.id
+        await db.commit()
+        await db.refresh(row)
+        override_enabled = row.is_enabled
+        updated_by = row.updated_by
+        updated_at = row.updated_at
+    data = schemas.AccountPreferenceRead(
+        event_id=event_id,
+        user_id=user_id,
+        trigger=trigger,
+        global_enabled=template.is_enabled,
+        override_enabled=override_enabled,
+        effective_enabled=template.is_enabled and override_enabled is not False,
+        updated_by=updated_by,
+        updated_at=updated_at,
+    )
+    return success_response("Pengaturan notifikasi akun berhasil diperbarui", data, request=request)
 
 
 @router.get("")
