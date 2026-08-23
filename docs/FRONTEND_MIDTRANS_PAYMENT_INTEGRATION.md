@@ -34,6 +34,42 @@ harus membaca `GET /api/v1/payments/{payment_id}` sampai status final. Backend
 hanya mengubah pembayaran menjadi sukses setelah signature notification valid
 dan status tersebut dikonfirmasi lagi melalui API Midtrans.
 
+## Status dan referensi transaksi
+
+Halaman pembayaran pelanggan tidak memerlukan perubahan kontrak. Tetap gunakan
+`transaction_status` dari endpoint detail payment sebagai sumber status UI:
+
+- `created` atau `pending`: menunggu pembayaran; jangan tampilkan sukses.
+- `success`: pembayaran berhasil dan pengguna dapat melanjutkan.
+- `failed` atau `expired`: tampilkan aksi pembayaran ulang bila backend telah
+  mengizinkannya.
+- `refunded`: pembayaran telah dikembalikan.
+
+Jangan memakai redirect, token Snap, atau keberadaan ID transaksi sebagai bukti
+pembayaran. Hanya status `success` hasil verifikasi backend yang final.
+
+Untuk halaman report admin/organizer, tampilkan kedua field berikut sebagai
+kolom yang dapat disalin:
+
+- `provider_order_id`: referensi checkout/order Midtrans. Selalu menjadi
+  referensi utama untuk transaksi pending atau "not payment".
+- `provider_transaction_id`: `transaction_id` dari Midtrans setelah notification
+  diterima; dapat `null` sebelum Midtrans mengirim status transaksi.
+
+Report tersedia melalui:
+
+```http
+GET /api/v1/admin/reports/payments/midtrans
+GET /api/v1/admin/reports/payments/midtrans.csv
+```
+
+UI report sebaiknya menandai pembayaran sah hanya ketika
+`transaction_status === "success"` dan `order_status === "paid"`. Untuk
+rekonsiliasi manual tampilkan juga `gross_amount`, `currency`, `paid_at`,
+`customer_email`, dan kedua referensi Midtrans tersebut. Frontend tidak perlu dan
+tidak boleh memanggil Midtrans Status API secara langsung karena Server Key tetap
+dimiliki backend.
+
 ## Konfigurasi Midtrans
 
 Atur Payment Notification URL di dashboard Midtrans ke:

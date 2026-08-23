@@ -1055,10 +1055,42 @@ Response JSON memberikan `summary`, agregasi `by_status`, `by_channel`,
 {"total_transactions":12,"successful_transactions":8,"pending_transactions":2,"failed_transactions":1,"expired_transactions":1,"gross_revenue":64000000,"pending_amount":16000000,"currency":"IDR"}
 ```
 
+Setiap item `transactions` pada laporan Midtrans memuat dua referensi gateway:
+
+- `provider_order_id`: Midtrans order ID unik yang dibuat saat checkout, contoh
+  `ORD-...-MT-ABC12345`. Field ini tersedia sebelum pembayaran selesai dan dapat
+  dipakai untuk mencari transaksi atau memanggil Status API Midtrans.
+- `provider_transaction_id`: `transaction_id` resmi dari Midtrans. Field ini
+  diisi setelah notification diterima dan hasilnya diverifikasi ulang ke
+  Midtrans; pada transaksi baru/pending field ini dapat bernilai `null`.
+
+Contoh transaksi Midtrans:
+
+```json
+{
+  "payment_id": "payment-uuid",
+  "transaction_status": "success",
+  "provider_order_id": "ORD-2026-MT-ABC12345",
+  "provider_transaction_id": "midtrans-transaction-uuid",
+  "gross_amount": 8000000,
+  "currency": "IDR",
+  "order_status": "paid",
+  "paid_at": "2026-08-23T10:15:00Z",
+  "customer_email": "participant@example.com"
+}
+```
+
+Untuk rekonsiliasi, anggap pembayaran final hanya jika
+`transaction_status=success` dan `order_status=paid`. Keberadaan salah satu ID
+gateway saja bukan bukti pembayaran. Gunakan `provider_order_id` untuk menelusuri
+transaksi pending/not payment, dan `provider_transaction_id` sebagai referensi
+transaksi yang telah dilaporkan Midtrans.
+
 `gross_revenue`, `tickets_sold`, dan `daily_revenue` hanya menghitung payment
 berstatus `success`. Browser return tidak pernah dihitung sebagai keberhasilan;
 sumber final tetap notification gateway yang telah diverifikasi. CSV berisi detail
-payment, order, registrasi, event, peserta, paket, channel, reference gateway,
+payment, order, registrasi, event, peserta, paket, channel,
+`provider_order_id`, `provider_transaction_id`, reference gateway,
 nominal, dan waktu pembayaran sesuai filter yang sama.
 
 ## 14. Tickets dan check-in

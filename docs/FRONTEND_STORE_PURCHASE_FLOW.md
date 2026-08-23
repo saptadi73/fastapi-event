@@ -152,6 +152,11 @@ terminal atau komponen dilepas.
 | `failed` | Pembayaran gagal | Izinkan payment ulang setelah order baru/valid |
 | `expired` | Pembayaran kedaluwarsa | Izinkan checkout ulang |
 
+Khusus Midtrans, keberadaan `provider_order_id` atau
+`provider_transaction_id` tidak mengubah aturan UI di atas. Frontend tetap
+menentukan hasil dari `transaction_status`; ID gateway hanya ditampilkan sebagai
+referensi invoice, report admin, atau troubleshooting.
+
 ## 6. Error handling
 
 - `401`: token invalid/expired, arahkan login atau refresh token.

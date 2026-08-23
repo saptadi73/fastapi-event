@@ -54,6 +54,7 @@ class PaymentReportingService:
                 Payment.gross_amount,
                 Payment.currency,
                 Payment.provider_transaction_id,
+                Payment.provider_order_id,
                 Payment.provider_reference_no,
                 Payment.virtual_account_no,
                 Order.id.label("order_id"),
@@ -187,7 +188,7 @@ class PaymentReportingService:
         columns = [
             "payment_id", "created_at", "paid_at", "transaction_status", "payment_type",
             "channel_code", "gross_amount", "currency", "provider_transaction_id",
-            "provider_reference_no", "virtual_account_no", "order_id", "order_number",
+            "provider_order_id", "provider_reference_no", "virtual_account_no", "order_id", "order_number",
             "order_status", "registration_id", "registration_number", "event_id", "event_name",
             "customer_name", "customer_email", "package_id", "package_code", "package_name",
         ]

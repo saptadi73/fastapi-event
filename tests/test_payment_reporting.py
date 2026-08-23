@@ -18,6 +18,7 @@ def payment_row(status: str, amount: str, channel: str, package_code: str = "PKG
         "gross_amount": Decimal(amount),
         "currency": "IDR",
         "provider_transaction_id": "REQ-1",
+        "provider_order_id": "ORD-TEST-MT-ABC12345",
         "provider_reference_no": None,
         "virtual_account_no": "12345",
         "order_id": uuid.uuid4(),
@@ -57,6 +58,8 @@ class PaymentReportingTests(unittest.TestCase):
         self.assertIn("payment_id,created_at,paid_at", content)
         self.assertIn("MANDIRI", content)
         self.assertIn("10000.0", content)
+        self.assertIn("provider_order_id", content)
+        self.assertIn("ORD-TEST-MT-ABC12345", content)
 
 
 if __name__ == "__main__":
