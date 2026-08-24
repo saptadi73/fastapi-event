@@ -199,6 +199,30 @@ Khusus Midtrans, keberadaan `provider_order_id` atau
 menentukan hasil dari `transaction_status`; ID gateway hanya ditampilkan sebagai
 referensi invoice, report admin, atau troubleshooting.
 
+## 5b. Laporan participant untuk admin/organizer
+
+Panel admin dapat mengambil laporan participant lengkap dengan semua package dan
+status pembayaran melalui:
+
+```http
+GET /api/v1/admin/reports/participants
+GET /api/v1/admin/reports/participants.csv
+Authorization: Bearer <admin_or_organizer_access_token>
+```
+
+Filter opsional yang didukung adalah `event_id`, `package_id`,
+`payment_status`, dan `search`. Endpoint JSON juga menerima `page` dan `size`.
+
+Response JSON menggunakan satu item per participant. Jangan mengasumsikan field
+`packages` hanya berisi satu item: participant dapat membeli beberapa package
+dalam satu order atau order yang berbeda. Render status pembayaran pada setiap
+package berdasarkan `payment_status`, karena sebagian package dapat sudah
+`success` sementara package lain masih `pending`.
+
+CSV menggunakan satu baris per package dan mengulang identitas participant pada
+setiap baris. Format ini sengaja berbeda dari pengelompokan JSON agar mudah
+difilter dan dipivot di spreadsheet.
+
 ## 6. Error handling
 
 - `401`: token invalid/expired, arahkan login atau refresh token.
