@@ -10,13 +10,13 @@ from app.modules.speakers.models import EventSpeaker, Speaker
 class SpeakerRepository:
     @staticmethod
     async def list_speakers(session: AsyncSession, skip: int = 0, limit: int = 100):
-        stmt = select(Speaker).order_by(Speaker.created_at.desc()).offset(skip).limit(limit)
+        stmt = select(Speaker).order_by(Speaker.created_at.asc()).offset(skip).limit(limit)
         result = await session.execute(stmt)
         return result.scalars().all()
 
     @staticmethod
     async def list_featured(session: AsyncSession, limit: int = 100):
-        stmt = select(Speaker).where(Speaker.is_featured == True).order_by(Speaker.created_at.desc()).limit(limit)
+        stmt = select(Speaker).where(Speaker.is_featured == True).order_by(Speaker.created_at.asc()).limit(limit)
         result = await session.execute(stmt)
         return result.scalars().all()
 
@@ -24,7 +24,7 @@ class SpeakerRepository:
     async def list_featured_by_event(session: AsyncSession, event_id: uuid.UUID, limit: int = 100):
         stmt = (select(Speaker).join(EventSpeaker, EventSpeaker.speaker_id == Speaker.id)
                 .where(EventSpeaker.event_id == event_id, Speaker.is_featured.is_(True))
-                .order_by(Speaker.created_at.desc()).limit(limit))
+                .order_by(Speaker.created_at.asc()).limit(limit))
         result = await session.execute(stmt)
         return result.scalars().all()
 
