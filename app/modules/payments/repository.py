@@ -55,7 +55,11 @@ class PaymentRepository:
             raise ConflictException(code="ORDER_EXISTS", message="Order aktif sudah ada")
 
         # IWBIF price is always resolved server-side from the selected package.
-        from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
+        from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail, DelegateRegistrationPackageSelection
+        selections = list((await session.execute(
+            select(DelegateRegistrationPackageSelection)
+            .where(DelegateRegistrationPackageSelection.registration_id == registration_id)
+        )).scalars())
         package_row = (await session.execute(
             select(DelegatePackage)
             .join(DelegateRegistrationDetail, DelegateRegistrationDetail.delegate_package_id == DelegatePackage.id)
@@ -65,8 +69,15 @@ class PaymentRepository:
             raise ValidationException("DELEGATE_PACKAGE_NOT_FOUND", "Paket delegate registrasi tidak ditemukan")
         # Keep the documented package display price (often USD) separate from
         # the fixed amount charged by Indonesian payment rails.
-        subtotal = package_row.payment_amount_idr if package_row.payment_amount_idr is not None else package_row.amount
-        currency = "IDR" if package_row.payment_amount_idr is not None else package_row.currency
+        if selections:
+            currencies = {row.payment_currency for row in selections}
+            if len(currencies) != 1:
+                raise ValidationException("MIXED_CURRENCY", "Pilihan package harus menggunakan mata uang pembayaran yang sama")
+            subtotal = sum((row.selected_payment_amount for row in selections), 0)
+            currency = currencies.pop()
+        else:
+            subtotal = package_row.payment_amount_idr if package_row.payment_amount_idr is not None else package_row.amount
+            currency = "IDR" if package_row.payment_amount_idr is not None else package_row.currency
         from app.modules.participants.models import ParticipantProfile
         registration_owner = (await session.execute(
             select(ParticipantProfile.user_id)
@@ -89,6 +100,19 @@ class PaymentRepository:
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=45),
         )
         session.add(order)
+        await session.flush()
+        if selections:
+            from app.modules.store.models import OrderItem
+            for selected in selections:
+                session.add(OrderItem(
+                    order_id=order.id, product_id=None,
+                    product_code=f"{selected.package_code}_{selected.occupancy_type}"[:60],
+                    product_name=f"{selected.package_name} - {selected.rate_name}",
+                    product_type="delegate" if selected.selection_role == "main" else "additional",
+                    quantity=1, unit_price=selected.selected_payment_amount,
+                    currency=selected.payment_currency, line_total=selected.selected_payment_amount,
+                    metadata_json={"delegate_package_id": str(selected.delegate_package_id), "delegate_package_rate_id": str(selected.package_rate_id), "package_type": selected.selection_role, "package_code": selected.package_code, "package_name": selected.package_name, "rate_name": selected.rate_name, "occupancy_type": selected.occupancy_type, "display_amount": str(selected.selected_amount), "display_currency": selected.selected_currency},
+                ))
         await session.commit()
         await session.refresh(order)
         return order

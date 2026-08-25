@@ -17,9 +17,10 @@ from app.support.responses import success_response
 from . import schemas
 from .constants import *
 from .models import (BusinessMatchingProfileSlot, BusinessMatchingSlot, Company,
-    DelegatePackage, DelegateRegistrationDetail, EventActivity,
+    DelegatePackage, DelegatePackageFacility, DelegatePackageRate, DelegateRegistrationDetail, DelegateRegistrationPackageSelection, EventActivity,
     ExhibitorRegistration, RegistrationDocument)
 from .service import IwbifService
+from .package_service import DelegatePackageService
 
 router = APIRouter()
 
@@ -35,7 +36,40 @@ async def options(request: Request):
 
 @router.get("/events/{event_id}/delegate-packages")
 async def packages(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
-    rows = list((await db.execute(select(DelegatePackage).where(DelegatePackage.event_id == event_id, DelegatePackage.is_active.is_(True)).order_by(DelegatePackage.amount))).scalars()); return success_response("Paket delegate ditemukan", [schemas.PackageRead.model_validate(x) for x in rows], request=request)
+    rows = list((await db.execute(select(DelegatePackage).where(DelegatePackage.event_id == event_id, DelegatePackage.is_active.is_(True)).order_by(DelegatePackage.display_order, DelegatePackage.code))).scalars())
+    return success_response("Paket delegate ditemukan", [schemas.PackageRead.model_validate(x) for x in rows], request=request)
+
+@router.get("/events/{event_id}/delegate-package-catalog")
+async def package_catalog(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
+    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id), request=request)
+
+@router.get("/admin/events/{event_id}/delegate-package-catalog")
+async def admin_package_catalog(event_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id, admin=True), request=request)
+
+@router.post("/admin/events/{event_id}/delegate-packages/{package_id}/rates", status_code=201)
+async def create_package_rate(event_id: UUID, package_id: UUID, payload: schemas.PackageRateWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await DelegatePackageService.create_rate(db, event_id, package_id, payload); return success_response("Tarif package dibuat", schemas.PackageRateRead.model_validate(row), request=request)
+
+@router.put("/admin/delegate-package-rates/{rate_id}")
+async def update_package_rate(rate_id: UUID, payload: schemas.PackageRateWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await DelegatePackageService.update_rate(db, rate_id, payload); return success_response("Tarif package diperbarui", schemas.PackageRateRead.model_validate(row), request=request)
+
+@router.delete("/admin/delegate-package-rates/{rate_id}")
+async def disable_package_rate(rate_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    await DelegatePackageService.disable_rate(db, rate_id); return success_response("Tarif package dinonaktifkan", request=request)
+
+@router.post("/admin/events/{event_id}/delegate-packages/{package_id}/facilities", status_code=201)
+async def create_package_facility(event_id: UUID, package_id: UUID, payload: schemas.PackageFacilityWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await DelegatePackageService.create_facility(db, event_id, package_id, payload); return success_response("Facility package dibuat", schemas.PackageFacilityRead.model_validate(row), request=request)
+
+@router.put("/admin/delegate-package-facilities/{facility_id}")
+async def update_package_facility(facility_id: UUID, payload: schemas.PackageFacilityWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await DelegatePackageService.update_facility(db, facility_id, payload); return success_response("Facility package diperbarui", schemas.PackageFacilityRead.model_validate(row), request=request)
+
+@router.delete("/admin/delegate-package-facilities/{facility_id}")
+async def disable_package_facility(facility_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    await DelegatePackageService.disable_facility(db, facility_id); return success_response("Facility package dinonaktifkan", request=request)
 
 @router.get("/events/{event_id}/activities")
 async def activities(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
@@ -56,11 +90,20 @@ def master_crud(model, write_schema, read_schema, label):
         row = await db.get(model, item_id, with_for_update=True)
         if not row or row.event_id != event_id: raise NotFoundException("MASTER_NOT_FOUND", f"{label} tidak ditemukan")
         for key, value in payload.model_dump().items(): setattr(row, key, value)
+        if model is DelegatePackage:
+            rates = list((await db.execute(select(DelegatePackageRate).where(DelegatePackageRate.delegate_package_id == row.id))).scalars())
+            for rate in rates: await DelegatePackageService._sync_product(db, row, rate)
         await db.commit(); await db.refresh(row); return success_response(f"{label} berhasil diperbarui", read_schema.model_validate(row), request=request)
     async def delete(event_id: UUID, item_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
         row = await db.get(model, item_id, with_for_update=True)
         if not row or row.event_id != event_id: raise NotFoundException("MASTER_NOT_FOUND", f"{label} tidak ditemukan")
-        await db.delete(row); await db.commit(); return success_response(f"{label} berhasil dihapus", request=request)
+        if model is DelegatePackage:
+            row.is_active = False
+            rates = list((await db.execute(select(DelegatePackageRate).where(DelegatePackageRate.delegate_package_id == row.id))).scalars())
+            for rate in rates: await DelegatePackageService._sync_product(db, row, rate)
+        else:
+            await db.delete(row)
+        await db.commit(); return success_response(f"{label} berhasil dinonaktifkan" if model is DelegatePackage else f"{label} berhasil dihapus", request=request)
     return create, get, update, delete
 
 for _model, _write, _read, _segment, _label in [
@@ -85,7 +128,8 @@ async def create_registration(event_id: UUID, payload: schemas.DelegateRegistrat
     reg = await IwbifService.create_registration(db, event_id, user.id, payload)
     detail = await db.get(DelegateRegistrationDetail, reg.id)
     package = await db.get(DelegatePackage, detail.delegate_package_id); event = await db.get(Event, event_id)
-    background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": package.name, "package_code": package.code, "amount": package.amount, "currency": package.currency}, "registration", reg.id)
+    main_selection = (await db.execute(select(DelegateRegistrationPackageSelection).where(DelegateRegistrationPackageSelection.registration_id == reg.id, DelegateRegistrationPackageSelection.selection_role == "main"))).scalar_one_or_none()
+    background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": f"{main_selection.package_name} - {main_selection.rate_name}" if main_selection else package.name, "package_code": main_selection.package_code if main_selection else package.code, "amount": main_selection.selected_amount if main_selection else package.amount, "currency": main_selection.selected_currency if main_selection else package.currency}, "registration", reg.id)
     return success_response("Draft registrasi IWBIF berhasil dibuat", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
 @router.get("/events/{event_id}/registrations/{registration_id}")

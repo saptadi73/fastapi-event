@@ -14,7 +14,7 @@ from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.store.models import OrderItem, Product
 from app.modules.users.models import User
 from .models import (AccommodationTravel, BusinessMatchingProfileSlot, BusinessMatchingSlot,
-    Company, DelegatePackage, DelegateRegistrationDetail, EventActivity,
+    Company, DelegatePackage, DelegatePackageRate, DelegateRegistrationDetail, DelegateRegistrationPackageSelection, EventActivity,
     ExhibitorRegistration, RegistrationActivity, RegistrationDocument,
     RegistrationParticipationCategory)
 
@@ -146,6 +146,27 @@ class IwbifService:
         now = datetime.now(timezone.utc)
         data.update(registration_id=registration.id, company_id=company.id, terms_accepted_at=now, consent_accepted_at=now)
         db.add(DelegateRegistrationDetail(**data)); await db.flush()
+        purchased_selections = (await db.execute(
+            select(DelegatePackage, DelegatePackageRate, OrderItem)
+            .join(DelegatePackageRate, DelegatePackageRate.delegate_package_id == DelegatePackage.id)
+            .join(Product, Product.delegate_package_rate_id == DelegatePackageRate.id)
+            .join(OrderItem, OrderItem.product_id == Product.id)
+            .where(OrderItem.order_id == purchased_order.id)
+        )).all()
+        if purchased_selections:
+            mains = [(selected_package, rate) for selected_package, rate, _ in purchased_selections if selected_package.package_type == "main"]
+            if len(mains) != 1:
+                raise ValidationException("MAIN_PACKAGE_REQUIRED", "Order harus memiliki tepat satu Main Package")
+            for selected_package, rate, order_item in purchased_selections:
+                snapshot = order_item.metadata_json or {}
+                db.add(DelegateRegistrationPackageSelection(
+                    registration_id=registration.id, delegate_package_id=selected_package.id,
+                    package_rate_id=rate.id, selection_role=selected_package.package_type,
+                    occupancy_type=snapshot.get("occupancy_type", rate.occupancy_type), package_code=snapshot.get("package_code", selected_package.code),
+                    package_name=snapshot.get("package_name", selected_package.name), rate_name=snapshot.get("rate_name", rate.name),
+                    selected_amount=snapshot.get("display_amount", rate.amount), selected_currency=snapshot.get("display_currency", rate.currency),
+                    selected_payment_amount=order_item.unit_price, payment_currency=order_item.currency,
+                ))
         await IwbifService.replace_registration_relations(db, registration.id, payload)
         purchased_order.registration_id = registration.id
         await db.commit(); await db.refresh(registration)
@@ -161,7 +182,10 @@ class IwbifService:
     @staticmethod
     async def read_registration(db, registration_id, user_id):
         reg = await IwbifService.owned_registration(db, registration_id, user_id); detail = await db.get(DelegateRegistrationDetail, reg.id)
-        return IwbifService.serialize_registration(reg, detail)
+        data = IwbifService.serialize_registration(reg, detail)
+        rows = list((await db.execute(select(DelegateRegistrationPackageSelection).where(DelegateRegistrationPackageSelection.registration_id == reg.id).order_by(DelegateRegistrationPackageSelection.selection_role.desc()))).scalars())
+        data["package_selections"] = [{c.name: getattr(row, c.name) for c in row.__table__.columns} for row in rows]
+        return data
 
     @staticmethod
     def serialize_registration(reg, detail):

@@ -28,7 +28,7 @@ from app.modules.check_ins.models import CheckIn
 from app.modules.events.models import Event, EventStatus
 from app.modules.iwbif.models import (
     AccommodationTravel, BusinessMatchingProfileSlot, BusinessMatchingSlot,
-    Company, DelegatePackage, DelegateRegistrationDetail, EventActivity,
+    Company, DelegatePackage, DelegatePackageFacility, DelegatePackageRate, DelegateRegistrationDetail, EventActivity,
     ExhibitorRegistration, RegistrationActivity, RegistrationDocument,
     RegistrationParticipationCategory,
 )
@@ -147,14 +147,30 @@ async def seed():
         base_packages = seed_packages or PACKAGES
 
         fallback_idr = {code: payment_amount_idr for code, _, _, payment_amount_idr in PACKAGES}
+        excel_prices = {"A": (Decimal("500"), Decimal("700")), "B": (Decimal("400"), Decimal("550"))}
         for package_spec in base_packages:
             code, name, amount, payment_amount_idr = package_spec
+            if code in excel_prices: amount = excel_prices[code][0]
             payment_amount_idr = payment_amount_idr if payment_amount_idr is not None else fallback_idr.get(code)
-            packages_by_code[code] = await ensure(db, DelegatePackage, event_id=event.id, code=code, defaults=dict(name=name, currency="USD", amount=amount, payment_amount_idr=payment_amount_idr, is_active=True))
-        for delegate_package in packages_by_code.values():
-            payable_amount = delegate_package.payment_amount_idr if delegate_package.payment_amount_idr is not None else delegate_package.amount
-            payable_currency = "IDR" if delegate_package.payment_amount_idr is not None else delegate_package.currency
-            await ensure(db, Product, event_id=event.id, code=f"DELEGATE_{delegate_package.code}", defaults=dict(name=delegate_package.name, description=f"Pembelian {delegate_package.name} untuk IWBIF 2026", product_type="delegate", price=payable_amount, currency=payable_currency, max_quantity=1, metadata_json={"delegate_package_id": str(delegate_package.id), "display_amount": str(delegate_package.amount), "display_currency": delegate_package.currency}, is_active=delegate_package.is_active))
+            packages_by_code[code] = await ensure(db, DelegatePackage, event_id=event.id, code=code, defaults=dict(name=name, package_type="main", selection_mode="required_one", display_order=1 if code == "A" else 2, currency="USD", amount=amount, payment_amount_idr=payment_amount_idr, is_active=code in {"A", "B"}))
+        bandung = await ensure(db, DelegatePackage, event_id=event.id, code="TRIP_BANDUNG", defaults=dict(name="Additional Trip to Bandung", package_type="additional", selection_mode="optional", description="Optional Bandung trip", display_order=10, currency="USD", amount=Decimal("200"), payment_amount_idr=None, is_active=True))
+        packages_by_code["TRIP_BANDUNG"] = bandung
+        rate_specs = {"A": [("sharing", "Twin Sharing Basis", Decimal("500"), True), ("single", "Single Room", Decimal("700"), False)], "B": [("sharing", "Twin Sharing Basis", Decimal("400"), True), ("single", "Single Room", Decimal("550"), False)], "TRIP_BANDUNG": [("sharing", "Twin Sharing Basis", Decimal("200"), True), ("single", "Single Room", Decimal("300"), False)]}
+        for code, specs in rate_specs.items():
+            delegate_package = packages_by_code[code]
+            for occupancy, rate_name, amount, is_default in specs:
+                rate = await ensure(db, DelegatePackageRate, delegate_package_id=delegate_package.id, occupancy_type=occupancy, defaults=dict(name=rate_name, amount=amount, currency="USD", payment_amount_idr=delegate_package.payment_amount_idr if occupancy == "sharing" else None, is_default=is_default, is_active=True))
+                payable_amount = rate.payment_amount_idr if rate.payment_amount_idr is not None else rate.amount
+                payable_currency = "IDR" if rate.payment_amount_idr is not None else rate.currency
+                await ensure(db, Product, delegate_package_rate_id=rate.id, defaults=dict(event_id=event.id, code=f"DELEGATE_{code}_{occupancy.upper()}", name=f"{delegate_package.name} - {rate_name}", description=delegate_package.description, product_type="delegate" if delegate_package.package_type == "main" else "additional", price=payable_amount, currency=payable_currency, max_quantity=1, metadata_json={"delegate_package_id": str(delegate_package.id), "delegate_package_rate_id": str(rate.id), "package_type": delegate_package.package_type, "package_code": delegate_package.code, "package_name": delegate_package.name, "rate_name": rate_name, "occupancy_type": occupancy, "display_amount": str(amount), "display_currency": "USD"}, is_active=True))
+        facilities = {
+            "A": ["3 Nights Accommodation at 5 star hotel Jakarta", "Airport Transfers", "Local Transportation", "Conference Access & Pass to TEI - Trade Expo Indonesia", "2 lunches & 2 coffee breaks", "Welcome Dinner at PIK2", "Welcome Dinner hosted by Governor of DKI Jakarta", "Jakarta City Tour"],
+            "B": ["3 Nights Accommodation at 3/5 star hotel Jakarta", "Airport Transfers", "Local Transportation", "Conference Access & Pass to TEI - Trade Expo Indonesia", "2 lunches & 2 coffee breaks", "Welcome Dinner at PIK2", "Welcome Dinner hosted by Governor of DKI Jakarta", "Jakarta City Tour"],
+            "TRIP_BANDUNG": ["Accommodation at 4 star hotel Bandung", "Airport Transfers", "Local Transportation", "Meals As the Program", "Destination at Bandung", "Bandung City Tour", "Visiting Jababeka Industry"],
+        }
+        for code, names in facilities.items():
+            for position, facility_name in enumerate(names, 1):
+                await ensure(db, DelegatePackageFacility, delegate_package_id=packages_by_code[code].id, name=facility_name, defaults=dict(pricing_mode="included", currency="USD", display_order=position, is_active=True))
         activity = {}
         for name in ACTIVITIES: activity[name] = await ensure(db, EventActivity, event_id=event.id, name=name, defaults=dict(is_active=True))
         profile_slots = []

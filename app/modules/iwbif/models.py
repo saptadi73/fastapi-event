@@ -12,10 +12,50 @@ class DelegatePackage(Base):
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     code: Mapped[str] = mapped_column(String(30), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    package_type: Mapped[str] = mapped_column(String(20), default="main", nullable=False)
+    selection_mode: Mapped[str] = mapped_column(String(20), default="required_one", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     payment_amount_idr: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class DelegatePackageRate(Base):
+    __tablename__ = "delegate_package_rates"
+    __table_args__ = (UniqueConstraint("delegate_package_id", "occupancy_type", name="uq_delegate_package_occupancy"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    delegate_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_packages.id", ondelete="CASCADE"), nullable=False)
+    occupancy_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    payment_amount_idr: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class DelegatePackageFacility(Base):
+    __tablename__ = "delegate_package_facilities"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    delegate_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_packages.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[int | None] = mapped_column(Integer)
+    unit: Mapped[str | None] = mapped_column(String(40))
+    pricing_mode: Mapped[str] = mapped_column(String(30), default="included", nullable=False)
+    sharing_amount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    single_amount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class EventActivity(Base):
@@ -98,6 +138,25 @@ class DelegateRegistrationDetail(Base):
     consent_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class DelegateRegistrationPackageSelection(Base):
+    __tablename__ = "delegate_registration_package_selections"
+    __table_args__ = (UniqueConstraint("registration_id", "delegate_package_id", name="uq_registration_delegate_package"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), nullable=False)
+    delegate_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_packages.id"), nullable=False)
+    package_rate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_package_rates.id"), nullable=False)
+    selection_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    occupancy_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    package_code: Mapped[str] = mapped_column(String(30), nullable=False)
+    package_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    rate_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    selected_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    selected_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    selected_payment_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    payment_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AccommodationTravel(Base):

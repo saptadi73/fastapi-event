@@ -12,6 +12,7 @@ class Product(Base):
     __table_args__ = (UniqueConstraint("event_id", "code", name="uq_product_event_code"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    delegate_package_rate_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("delegate_package_rates.id", ondelete="CASCADE"), unique=True)
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     code: Mapped[str] = mapped_column(String(60), nullable=False)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
@@ -60,4 +61,4 @@ class OrderItem(Base):
     unit_price: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     line_total: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
-
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

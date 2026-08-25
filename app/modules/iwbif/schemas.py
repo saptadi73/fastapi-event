@@ -74,7 +74,7 @@ class DelegateRegistrationRead(BaseModel):
 
 
 class PackageRead(BaseModel):
-    id: UUID; event_id: UUID; code: str; name: str; currency: str; amount: float; payment_amount_idr: float | None = None; is_active: bool
+    id: UUID; event_id: UUID; code: str; name: str; package_type: str; selection_mode: str; description: str | None = None; display_order: int; currency: str; amount: float; payment_amount_idr: float | None = None; is_active: bool
     model_config = ConfigDict(from_attributes=True)
 
 class ActivityRead(BaseModel):
@@ -88,10 +88,83 @@ class SlotRead(BaseModel):
 class PackageWrite(BaseModel):
     code: str = Field(min_length=1, max_length=30)
     name: str = Field(min_length=1, max_length=160)
+    package_type: str = Field(default="main", pattern="^(main|additional)$")
+    selection_mode: str = Field(default="required_one", pattern="^(required_one|optional)$")
+    description: str | None = Field(default=None, max_length=3000)
+    display_order: int = Field(default=0, ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     amount: float = Field(gt=0)
     payment_amount_idr: float | None = Field(default=None, gt=0)
     is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_selection_mode(self):
+        expected = "required_one" if self.package_type == "main" else "optional"
+        if self.selection_mode != expected:
+            raise ValueError(f"{self.package_type} package must use selection_mode={expected}")
+        return self
+
+
+class PackageRateWrite(BaseModel):
+    occupancy_type: str = Field(pattern="^(sharing|single)$")
+    name: str = Field(min_length=1, max_length=120)
+    amount: float = Field(gt=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    payment_amount_idr: float | None = Field(default=None, gt=0)
+    is_default: bool = False
+    is_active: bool = True
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_validity(self):
+        if self.valid_from and self.valid_until and self.valid_until <= self.valid_from:
+            raise ValueError("valid_until must be after valid_from")
+        if self.is_default and not self.is_active:
+            raise ValueError("default rate must be active")
+        return self
+
+
+class PackageRateRead(PackageRateWrite):
+    id: UUID
+    delegate_package_id: UUID
+    product_id: UUID | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PackageFacilityWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    quantity: int | None = Field(default=None, ge=1)
+    unit: str | None = Field(default=None, max_length=40)
+    pricing_mode: str = Field(default="included", pattern="^(included|separately_priced)$")
+    sharing_amount: float | None = Field(default=None, ge=0)
+    single_amount: float | None = Field(default=None, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    display_order: int = Field(default=0, ge=0)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_pricing(self):
+        if self.pricing_mode == "separately_priced" and self.sharing_amount is None and self.single_amount is None:
+            raise ValueError("separately priced facility requires sharing_amount or single_amount")
+        return self
+
+
+class PackageFacilityRead(PackageFacilityWrite):
+    id: UUID
+    delegate_package_id: UUID
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PackageCatalogItem(PackageRead):
+    rates: list[PackageRateRead] = Field(default_factory=list)
+    facilities: list[PackageFacilityRead] = Field(default_factory=list)
+
+
+class PackageCatalogRead(BaseModel):
+    main_packages: list[PackageCatalogItem]
+    additional_packages: list[PackageCatalogItem]
 
 class ActivityWrite(BaseModel):
     name: str = Field(min_length=1, max_length=160)
