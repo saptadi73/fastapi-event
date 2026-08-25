@@ -85,6 +85,11 @@ registrasi, paket delegate/exhibitor, pembayaran, profil business matching, dan
 status meeting. Endpoint admin menyediakan preview, test-send, serta riwayat
 pengiriman; lihat `docs/EMAIL_REGISTRATION_NOTIFICATIONS.md`.
 
+Template default dan seed IWBIF menggunakan bahasa Inggris. Menjalankan ulang
+`scripts/seed_iwbif_2026.py` memperbarui subject/body template event seed ke copy
+bahasa Inggris yang canonical. Setelah seed, organizer tetap dapat mengubahnya
+melalui endpoint admin. Placeholder `{{ variable_name }}` tidak diterjemahkan.
+
 ### Pengaturan email notification oleh organizer
 
 Seluruh endpoint berikut membutuhkan role `admin` atau `organizer`:

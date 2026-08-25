@@ -44,6 +44,16 @@ mengembalikan password atau credential ke response API.
 
 ## Template notifikasi yang dikelola admin
 
+Template bawaan IWBIF ditulis dalam bahasa Inggris dengan sapaan profesional,
+CTA menuju `FRONTEND_LOGIN_URL`, dan penutup `The IWBIF Team`. Seed bersifat
+idempotent dan memperbarui template event seed yang sebelumnya masih berbahasa
+Indonesia. Perubahan manual organizer setelah seed tetap tersimpan sampai seed
+dijalankan kembali.
+
+Saat deployment production, jalankan seed hanya jika memang ingin menerapkan
+ulang canonical English copy. Untuk perubahan editorial harian gunakan endpoint
+admin, preview, dan test-send.
+
 Setiap event memiliki template yang dapat diaktifkan/dinonaktifkan serta diubah
 subjek dan isinya oleh admin. Template menggunakan variabel dengan format
 `{{ variable_name }}`. Daftar variabel yang diizinkan dikembalikan pada field
