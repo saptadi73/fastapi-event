@@ -45,6 +45,22 @@ class MeetingStatus(str, PyEnum):
     NO_SHOW = "no_show"
 
 
+class RecommendationStatus(str, PyEnum):
+    PROPOSED = "proposed"
+    AWAITING_RESPONSES = "awaiting_responses"
+    MUTUALLY_INTERESTED = "mutually_interested"
+    DECLINED = "declined"
+    EXPIRED = "expired"
+    CONVERTED_TO_MEETING = "converted_to_meeting"
+    CANCELLED = "cancelled"
+
+
+class RecommendationResponse(str, PyEnum):
+    PENDING = "pending"
+    INTERESTED = "interested"
+    NOT_INTERESTED = "not_interested"
+
+
 class BusinessMatchingProfile(Base):
     __tablename__ = "business_matching_profiles"
     __table_args__ = (
@@ -202,6 +218,8 @@ class Meeting(Base):
     purpose: Mapped[str] = mapped_column(String(80), nullable=False)
     topic: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(30), default="participant_request", nullable=False)
+    organizer_recommendation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("organizer_match_recommendations.id", ondelete="SET NULL"), unique=True)
     status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus, native_enum=False), default=MeetingStatus.REQUESTED, nullable=False)
     confirmed_slot_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("meeting_slots.id"))
     venue_resource_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("meeting_resources.id"))
@@ -210,6 +228,45 @@ class Meeting(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OrganizerMatchRecommendation(Base):
+    __tablename__ = "organizer_match_recommendations"
+    __table_args__ = (
+        Index("ix_match_recommendations_event_status", "event_id", "status"),
+        Index("ix_match_recommendations_participants", "participant_a_id", "participant_b_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    participant_a_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
+    participant_b_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("participants.id"), nullable=False)
+    recommended_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    topic: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(80), default="Organizer assisted matching", nullable=False)
+    proposed_slot_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    participant_a_response: Mapped[RecommendationResponse] = mapped_column(Enum(RecommendationResponse, native_enum=False), default=RecommendationResponse.PENDING, nullable=False)
+    participant_b_response: Mapped[RecommendationResponse] = mapped_column(Enum(RecommendationResponse, native_enum=False), default=RecommendationResponse.PENDING, nullable=False)
+    participant_a_responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    participant_b_responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[RecommendationStatus] = mapped_column(Enum(RecommendationStatus, native_enum=False), default=RecommendationStatus.AWAITING_RESPONSES, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class BusinessMatchingEventSettings(Base):
+    __tablename__ = "business_matching_event_settings"
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    assisted_matching_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_mutual_consent: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    auto_create_meeting: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    organizer_override_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    recommendation_expiry_hours: Mapped[int] = mapped_column(Integer, default=72, nullable=False)
+    reminder_hours_before_expiry: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    meeting_reminder_hours: Mapped[list] = mapped_column(JSON, default=lambda: [24, 1], nullable=False)
+    updated_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class MeetingSlotProposal(Base):

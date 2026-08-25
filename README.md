@@ -3,7 +3,8 @@
 Backend modular untuk International Women Business & Investment Forum 2026.
 Domain utama mencakup delegate registration, package dan payment, travel dan
 accommodation, exhibitor showcase, participant directory, business matching,
-messaging, meeting scheduling, ticket/QR, check-in, dan notification.
+messaging, meeting scheduling, organizer-assisted matching dengan mutual consent,
+operational reporting, ticket/QR, check-in, dan notification.
 
 ## Quick start
 
@@ -19,6 +20,11 @@ Seed bersifat idempotent dan membuat event IWBIF 2026, paket delegate,
 aktivitas event, serta slot business matching. API tersedia pada `/api/v1`
 dan dokumentasi interaktif pada `/docs`.
 
+Business matching mendukung dua jalur: request langsung antar-participant dan
+usulan organizer. Usulan organizer membutuhkan respons kedua pihak, dapat
+dikonversi otomatis menjadi meeting scheduling, dan dikelola melalui dashboard
+report/settings tanpa membuka conversation privat.
+
 Dokumen acuan:
 
 - `docs/IWAPI_SUMMIT_WEBSITE.md`
@@ -26,3 +32,4 @@ Dokumen acuan:
 - `docs/Backend_Business_Matching_FastAPI_v2.md`
 - `docs/FRONTEND_DOKU_PAYMENT_INTEGRATION.md`
 - `docs/FRONTEND_IWBIF_REGISTRATION_FLOW.md`
+- `docs/FRONTEND_BUSINESS_MATCHING_MESSAGING.md`

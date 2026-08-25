@@ -462,6 +462,29 @@ otomatis membaca isi conversation privat.
 
 ## 17. Organizer Assisted Matching
 
+Organizer-assisted matching adalah workflow persetujuan, bukan pemaksaan jadwal.
+Organizer mengusulkan pasangan berdasarkan kebutuhan, penawaran, sektor, negara,
+atau pertimbangan kuratorial. Kedua participant menerima notifikasi dan merespons
+secara terpisah. Isi conversation privat tidak dibuka kepada organizer.
+
+Alur status:
+
+``` text
+awaiting_responses
+  ├─ salah satu not_interested → declined
+  ├─ melewati expires_at       → expired
+  └─ keduanya interested       → mutually_interested
+                                  └─ auto_create_meeting=true
+                                     → converted_to_meeting
+                                     → meeting(scheduling)
+```
+
+Respons setiap participant: `pending`, `interested`, atau `not_interested`.
+Mutual consent selalu diwajibkan. Field pengaturan `require_mutual_consent`
+merupakan compliance guard dan tidak dapat dinonaktifkan melalui API.
+
+### Tabel recommendation
+
 `organizer_match_recommendations`:
 
 ``` text
@@ -471,14 +494,52 @@ participant_a_id UUID
 participant_b_id UUID
 recommended_by UUID
 reason text
+topic varchar(255)
+purpose varchar(80)
+proposed_slot_ids json
 participant_a_response enum
 participant_b_response enum
-status enum
+participant_a_responded_at timestamptz nullable
+participant_b_responded_at timestamptz nullable
+status enum(proposed, awaiting_responses, mutually_interested, declined,
+            expired, converted_to_meeting, cancelled)
+expires_at timestamptz nullable
 created_at timestamptz
+updated_at timestamptz
 ```
 
-Jika kedua pihak `interested`, sistem dapat membuka conversation dan
-scheduling.
+Meeting hasil konversi menyimpan `source=organizer_recommendation` dan
+`organizer_recommendation_id`. Meeting langsung masuk `scheduling`, bukan
+`confirmed`, sehingga pemilihan slot/resource tetap melewati conflict checking.
+
+### Pengaturan per event
+
+`business_matching_event_settings` menyimpan:
+
+- `assisted_matching_enabled`;
+- `require_mutual_consent` (wajib `true`);
+- `auto_create_meeting`;
+- `organizer_override_enabled`;
+- `recommendation_expiry_hours` (1–720);
+- `reminder_hours_before_expiry` (1–168);
+- `meeting_reminder_hours` (maksimal lima nilai, masing-masing 1–720);
+- `updated_by` dan `updated_at`.
+
+Jika pengaturan belum ada, GET settings membuat default aman: assisted matching,
+mutual consent, auto-create, dan override aktif; recommendation berlaku 72 jam;
+reminder recommendation 24 jam; reminder meeting 24 dan 1 jam sebelumnya.
+
+### Operasi dan laporan organizer
+
+Organizer dapat melihat metadata meeting seluruh event, mencari participant,
+perusahaan, atau topik, serta memfilter `status` dan `source`. Summary laporan
+memuat seluruh status, `total`, dan `needs_attention`. Nilai `needs_attention`
+adalah jumlah `requested + accepted + scheduling + reschedule_requested`.
+
+Command organizer: `confirm`, `cancel`, `complete`, dan `no_show`. Setiap command
+wajib memiliki `reason`, mengikuti state machine, menghasilkan notifikasi kepada
+kedua participant, dan dicatat dalam audit log. `confirm` juga membutuhkan
+`slot_id` dan `resource_id` serta menjalankan conflict checking atomik.
 
 ## 18. Audit Trail
 
@@ -517,6 +578,9 @@ meetings(recipient_participant_id, status)
 meetings(confirmed_slot_id)
 meetings(venue_resource_id, confirmed_slot_id)
 notifications(user_id, is_read, created_at)
+organizer_match_recommendations(event_id, status)
+organizer_match_recommendations(participant_a_id, participant_b_id)
+meetings(organizer_recommendation_id) unique
 ```
 
 ## 20. Standard API Response
@@ -579,6 +643,24 @@ GET /events/{event_id}/meeting-resources
 GET /events/{event_id}/availability
 ```
 
+### Organizer-assisted matching
+
+``` http
+POST /admin/events/{event_id}/business-matching/recommendations
+GET  /admin/events/{event_id}/business-matching/recommendations?status=awaiting_responses
+GET  /events/{event_id}/business-matching/organizer-recommendations
+POST /business-matching/organizer-recommendations/{recommendation_id}/respond
+```
+
+### Organizer operations, report, dan settings
+
+``` http
+GET  /admin/events/{event_id}/business-matching/report
+POST /admin/meetings/{meeting_id}/action
+GET  /admin/events/{event_id}/business-matching/settings
+PUT  /admin/events/{event_id}/business-matching/settings
+```
+
 ## 22. Transaction Boundary Penting
 
 Gunakan transaction untuk:
@@ -590,6 +672,9 @@ Gunakan transaction untuk:
 -   reschedule;
 -   cancel meeting;
 -   allocate/release resource.
+-   recommendation response + optional automatic meeting creation;
+-   organizer meeting action + notification + audit;
+-   event settings upsert + audit.
 
 `confirm meeting` adalah operasi paling kritis karena menyentuh meeting,
 participant schedule, slot, resource, system message, notification, dan
@@ -613,6 +698,8 @@ audit.
 -   Email notification
 -   Reminder
 -   Organizer monitoring
+-   Organizer-assisted matching dengan mutual consent
+-   Organizer operational report dan event-level settings
 -   Audit log
 
 ### Phase 2
@@ -622,7 +709,6 @@ audit.
 -   Attachment/brochure
 -   Business card exchange
 -   AI/semantic recommendation
--   Organizer-assisted matching
 -   Meeting feedback
 -   Advanced analytics
 
@@ -635,6 +721,9 @@ Unit test:
 -   meeting state transition;
 -   conflict detection;
 -   privacy/block rules.
+-   recommendation expiry dan mutual consent;
+-   organizer override state transition;
+-   report summary dan filter.
 
 Integration test:
 
@@ -644,6 +733,8 @@ Integration test:
 -   reschedule;
 -   cancellation;
 -   notification generation.
+-   organizer recommendation → two responses → scheduling meeting;
+-   organizer confirm → conflict check → participant notifications + audit.
 
 Security test:
 

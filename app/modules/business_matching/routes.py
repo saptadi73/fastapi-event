@@ -13,6 +13,7 @@ from . import schemas
 from .models import ConversationParticipant, MatchingSession, Meeting, MeetingSlot, Notification, ParticipantBlock, ParticipantReport
 from .repository import BusinessMatchingRepository as Repo
 from .service import BusinessMatchingService as Service
+from .organizer_service import OrganizerMatchingService
 from .realtime import conversation_hub
 from app.modules.email_notifications.service import deliver_meeting_update, deliver_to_user
 from app.modules.participants.models import ParticipantProfile
@@ -282,3 +283,57 @@ async def admin_read_all(request: Request, event_id: UUID | None = None, admin: 
     await db.execute(q.values(is_read=True, read_at=datetime.now(timezone.utc)))
     await db.commit()
     return success_response("Semua notifikasi admin ditandai dibaca", request=request)
+
+
+@router.post("/admin/events/{event_id}/business-matching/recommendations", status_code=201)
+async def create_organizer_recommendation(event_id: UUID, payload: schemas.OrganizerRecommendationCreate, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await OrganizerMatchingService.create_recommendation(db, event_id, admin, payload)
+    return success_response("Usulan business matching berhasil dikirim", schemas.OrganizerRecommendationRead.model_validate(row), request=request)
+
+
+@router.get("/admin/events/{event_id}/business-matching/recommendations")
+async def organizer_recommendations(event_id: UUID, request: Request, status_filter: str | None = Query(None, alias="status"), admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    rows = await OrganizerMatchingService.recommendations(db, event_id, status_filter)
+    return success_response("Daftar usulan business matching ditemukan", [schemas.OrganizerRecommendationRead.model_validate(x) for x in rows], request=request)
+
+
+@router.get("/events/{event_id}/business-matching/organizer-recommendations")
+async def my_organizer_recommendations(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    rows = await OrganizerMatchingService.participant_recommendations(db, event_id, user.id)
+    return success_response("Daftar usulan organizer ditemukan", [schemas.OrganizerRecommendationRead.model_validate(x) for x in rows], request=request)
+
+
+@router.post("/business-matching/organizer-recommendations/{recommendation_id}/respond")
+async def respond_organizer_recommendation(recommendation_id: UUID, payload: schemas.RecommendationResponseWrite, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    row, meeting = await OrganizerMatchingService.respond(db, recommendation_id, user.id, payload.response)
+    data = schemas.OrganizerRecommendationRead.model_validate(row).model_dump(mode="json")
+    data["meeting_id"] = str(meeting.id) if meeting else None
+    return success_response("Respons usulan business matching tersimpan", data, request=request)
+
+
+@router.get("/admin/events/{event_id}/business-matching/report")
+async def organizer_meeting_report(event_id: UUID, request: Request, status_filter: str | None = Query(None, alias="status"), source: str | None = None, search: str | None = None, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100), admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    data = await OrganizerMatchingService.meeting_report(db, event_id, status_filter, source, search, page, size)
+    return success_response("Laporan operasional business matching ditemukan", data, request=request)
+
+
+@router.post("/admin/meetings/{meeting_id}/action")
+async def organizer_meeting_action(meeting_id: UUID, payload: schemas.OrganizerMeetingAction, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await OrganizerMatchingService.operate_meeting(db, meeting_id, admin, payload)
+    return success_response("Tindakan organizer pada meeting berhasil", schemas.MeetingRead.model_validate(row), request=request)
+
+
+@router.get("/admin/events/{event_id}/business-matching/settings")
+async def organizer_matching_settings(event_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    from .models import BusinessMatchingEventSettings
+    row = await db.get(BusinessMatchingEventSettings, event_id)
+    if row is None:
+        payload = schemas.BusinessMatchingSettingsWrite()
+        row = await OrganizerMatchingService.update_settings(db, event_id, admin, payload)
+    return success_response("Pengaturan business matching ditemukan", schemas.BusinessMatchingSettingsRead.model_validate(row), request=request)
+
+
+@router.put("/admin/events/{event_id}/business-matching/settings")
+async def update_organizer_matching_settings(event_id: UUID, payload: schemas.BusinessMatchingSettingsWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    row = await OrganizerMatchingService.update_settings(db, event_id, admin, payload)
+    return success_response("Pengaturan business matching diperbarui", schemas.BusinessMatchingSettingsRead.model_validate(row), request=request)
