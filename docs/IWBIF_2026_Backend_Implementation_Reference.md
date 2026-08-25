@@ -150,7 +150,7 @@ Jangan menjadikan ketiga field tersebut mandatory secara global karena source me
 Required single choice:
 
 - Package A - USD500
-- Package B - USD700
+- Package B - USD400 (sharing); USD550 (single)
 - Package C - USD370
 
 Recommended master:

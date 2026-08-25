@@ -133,12 +133,17 @@ type PackageRate = {
 ```
 
 Tampilkan `USD {amount}` sebagai harga utama. Jika `payment_amount_idr` tersedia,
-tampilkan teks sekunder seperti `Dibayar Rp11.200.000`. Jangan menghitung IDR
+tampilkan teks sekunder seperti `Dibayar Rp12.600.000`. Jangan menghitung IDR
 dari kurs di browser dan jangan mengirim nominal ke checkout.
 
 Jika `payment_amount_idr=null`, UI boleh menampilkan `Nominal IDR belum tersedia`
 dan menonaktifkan kanal DOKU/Midtrans. Sumber total pembayaran resmi tetap
 response cart/order, bukan penjumlahan lokal.
+
+Canonical seed memakai kurs tetap 1 USD = IDR 18.000 dan mengisi seluruh rate:
+A sharing/single Rp9.000.000/Rp12.600.000; B Rp7.200.000/Rp9.900.000; Bandung
+Rp3.600.000/Rp5.400.000. Karena admin dapat mengubahnya, frontend tetap harus
+membaca `payment_amount_idr` dari API dan tidak hard-code nilai tersebut.
 
 Contoh formatter:
 

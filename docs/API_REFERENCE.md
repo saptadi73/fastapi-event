@@ -353,6 +353,20 @@ sharing + supplement. `amount/currency` untuk display; `payment_amount_idr`
 untuk charge payment rail Indonesia. Frontend menambahkan `product_id` milik
 rate terpilih ke cart dan tidak pernah mengirim nominal.
 
+Seed memakai kurs tetap yang disetujui organizer: **1 USD = IDR 18.000**.
+
+| Package | Occupancy | Display USD | Payment IDR |
+|---|---|---:|---:|
+| A | Sharing | 500 | 9.000.000 |
+| A | Single | 700 | 12.600.000 |
+| B | Sharing | 400 | 7.200.000 |
+| B | Single | 550 | 9.900.000 |
+| Bandung | Sharing | 200 | 3.600.000 |
+| Bandung | Single | 300 | 5.400.000 |
+
+Nilai IDR tetap dapat diubah organizer melalui rate editor dan tidak dihitung
+ulang otomatis mengikuti kurs.
+
 Contoh rate lengkap untuk integrasi frontend/admin:
 
 ```json
