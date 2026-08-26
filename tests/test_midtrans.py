@@ -1,5 +1,7 @@
 import hashlib
+import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from app.core.config import Settings
@@ -7,6 +9,8 @@ from app.modules.payments.midtrans import (
     MidtransClient, normalize_midtrans_channel, verify_notification_signature,
     verify_pay_account_signature,
 )
+from app.modules.payments.models import Payment, PaymentStatus
+from app.modules.payments.service import PaymentService
 
 
 class MidtransSecurityTests(unittest.TestCase):
@@ -53,6 +57,38 @@ class MidtransSecurityTests(unittest.TestCase):
 
     def test_virtual_account_channel_uses_bank(self):
         self.assertEqual("BCA", normalize_midtrans_channel({"payment_type": "bank_transfer", "bank": "bca"}))
+
+    def test_unexpired_snap_token_can_be_reused(self):
+        now = datetime.now(timezone.utc)
+        payment = Payment(
+            checkout_url="https://app.sandbox.midtrans.com/snap/v4/redirection/token",
+            transaction_status=PaymentStatus.PENDING,
+            expired_at=now + timedelta(minutes=5),
+            raw_response=json.dumps({"token": "fresh-token"}),
+        )
+
+        self.assertEqual("fresh-token", PaymentService._reusable_midtrans_token(payment, now))
+
+    def test_expired_snap_token_is_not_reused(self):
+        now = datetime.now(timezone.utc)
+        payment = Payment(
+            checkout_url="https://app.sandbox.midtrans.com/snap/v4/redirection/token",
+            transaction_status=PaymentStatus.PENDING,
+            expired_at=now - timedelta(seconds=1),
+            raw_response=json.dumps({"token": "stale-token"}),
+        )
+
+        self.assertEqual("", PaymentService._reusable_midtrans_token(payment, now))
+
+    def test_snap_token_without_expiry_is_not_reused(self):
+        payment = Payment(
+            checkout_url="https://app.sandbox.midtrans.com/snap/v4/redirection/token",
+            transaction_status=PaymentStatus.PENDING,
+            expired_at=None,
+            raw_response=json.dumps({"token": "unknown-age-token"}),
+        )
+
+        self.assertEqual("", PaymentService._reusable_midtrans_token(payment))
 
 
 if __name__ == "__main__":

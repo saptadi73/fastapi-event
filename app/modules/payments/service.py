@@ -27,6 +27,26 @@ from app.modules.business_matching.models import Notification
 
 class PaymentService:
     @staticmethod
+    def _reusable_midtrans_token(payment: Payment | None, now: datetime | None = None) -> str:
+        """Return a Snap token only while the local payment window is still open."""
+        if not payment or not payment.checkout_url:
+            return ""
+        if payment.transaction_status not in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
+            return ""
+        if payment.expired_at is None:
+            return ""
+
+        current_time = now or datetime.now(timezone.utc)
+        expires_at = payment.expired_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= current_time:
+            return ""
+
+        stored = json.loads(payment.raw_response or "{}")
+        return str(stored.get("token") or "")
+
+    @staticmethod
     async def _admin_user_ids(db: AsyncSession):
         rows = (await db.execute(select(User.id).where(User.role.in_(["admin", "organizer"]), User.status == "active"))).all()
         return [row[0] for row in rows]
@@ -560,14 +580,27 @@ class PaymentService:
             raise ValidationException("MIDTRANS_IDR_REQUIRED", "Midtrans memerlukan tagihan IDR tanpa desimal")
 
         payment = await PaymentRepository.get_payment_by_order(session, order.id, "midtrans")
-        if payment and payment.checkout_url and payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
-            stored = json.loads(payment.raw_response or "{}")
-            token = str(stored.get("token") or "")
-            if token:
-                return schemas.MidtransCheckoutResponse(
-                    payment_url=payment.checkout_url, token=token, expires_at=payment.expired_at,
-                    payment_id=payment.id, order_status=order.status,
-                ), order
+        now = datetime.now(timezone.utc)
+        token = PaymentService._reusable_midtrans_token(payment, now)
+        if token:
+            return schemas.MidtransCheckoutResponse(
+                payment_url=payment.checkout_url, token=token, expires_at=payment.expired_at,
+                payment_id=payment.id, order_status=order.status,
+            ), order
+
+        # Preserve the old attempt so a delayed Midtrans webhook can still be
+        # matched by its provider_order_id. A retry gets its own payment row.
+        if payment:
+            expires_at = payment.expired_at
+            if expires_at and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if (
+                payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}
+                and (expires_at is None or expires_at <= now)
+            ):
+                payment.transaction_status = PaymentStatus.EXPIRED
+                payment.expired_at = expires_at or now
+            payment = None
 
         if registration is None and order.registration_id:
             registration = await session.get(Registration, order.registration_id)
