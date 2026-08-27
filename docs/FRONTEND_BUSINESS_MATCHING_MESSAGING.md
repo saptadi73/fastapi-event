@@ -177,9 +177,12 @@ frontend perlu tetap menampilkan `pending` sampai backend menegaskan `success` p
 endpoint payment/order. Aksi manual ada pada admin:
 
 - Admin/organizer tetap membaca notifikasi `payment_status_update` di inboxnya.
-- Gunakan `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment` saat
-  verifikasi manual diperlukan (dengan `payment_method` sesuai kanal dan
-  referensi transaksi yang sah).
+- Gunakan `GET /api/v1/admin/transactions`, lalu
+  `PATCH /api/v1/admin/transactions/{payment_id}/status` saat rekonsiliasi
+  transaksi manual maupun gateway diperlukan. Status yang diterima adalah
+  `paid`, `success`, dan `cancelled`.
+- `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment` tetap tersedia
+  khusus workflow manual lama berbasis order.
 - Lanjutkan menampilkan status “Menunggu validasi admin” pada akun user sampai
   backend membentuk status `success` final.
 

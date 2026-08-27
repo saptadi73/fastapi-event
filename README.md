@@ -25,6 +25,13 @@ usulan organizer. Usulan organizer membutuhkan respons kedua pihak, dapat
 dikonversi otomatis menjadi meeting scheduling, dan dikelola melalui dashboard
 report/settings tanpa membuka conversation privat.
 
+Operasional pembayaran menyediakan daftar transaksi terpadu untuk seluruh
+provider melalui `GET /api/v1/admin/transactions`. Role `admin` dan `organizer`
+dapat merekonsiliasi transaksi manual maupun payment gateway melalui
+`PATCH /api/v1/admin/transactions/{payment_id}/status`, atau menghapus transaksi
+yang tidak lagi diperlukan melalui `DELETE /api/v1/admin/transactions/{payment_id}`.
+Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
+
 Dokumen acuan:
 
 - `docs/IWAPI_SUMMIT_WEBSITE.md`

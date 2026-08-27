@@ -878,7 +878,11 @@ Sumber kebenaran tetap endpoint `GET /api/v1/payments/{payment_id}`.
   dan dapat digunakan untuk menindaklanjuti verifikasi manual:
   - `GET /api/v1/admin/notifications?event_id=<uuid>`
   - `POST /api/v1/admin/notifications/{notification_id}/read`
-  - `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment`
+  - `GET /api/v1/admin/transactions`
+  - `PATCH /api/v1/admin/transactions/{payment_id}/status` untuk manual maupun
+    payment gateway;
+  - `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment` khusus alur
+    manual lama berbasis order.
 
 `entity_type` yang umum dipakai pada kasus ini: `order`, `payment`,
 `manual_payment`, `manual_payment_confirmation`, `admin_order`.
@@ -1394,7 +1398,8 @@ Query parameter opsional untuk seluruh endpoint laporan:
 - `event_id`: UUID event.
 - `date_from`, `date_to`: datetime ISO 8601. Filter memakai `paid_at`, atau
   `created_at` ketika transaksi belum dibayar.
-- `status`: `created`, `pending`, `success`, `failed`, `expired`, atau `refunded`.
+- `status`: `created`, `pending`, `success`, `failed`, `expired`, `refunded`,
+  atau `cancelled`.
 - `channel_code`: contoh `BCA`, `BNI`, `BRI`, atau `MANDIRI`.
 - `package_id`: UUID delegate package/tiket.
 - Khusus JSON: `limit` 1–500 dan `offset` untuk daftar transaksi.
@@ -1475,8 +1480,8 @@ Query parameter opsional:
 
 - `event_id`: UUID event yang package-nya ingin ditampilkan.
 - `package_id`: UUID delegate package.
-- `payment_status`: `created`, `pending`, `success`, `failed`, `expired`, atau
-  `refunded`.
+- `payment_status`: `created`, `pending`, `success`, `failed`, `expired`,
+  `refunded`, atau `cancelled`.
 - `search`: pencarian case-insensitive pada nama participant, email, atau nama
   organisasi.
 - Khusus JSON: `page` mulai dari 1 dan `size` 1–200. Pagination dilakukan per
