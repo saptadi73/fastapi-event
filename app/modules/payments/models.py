@@ -68,6 +68,20 @@ class Payment(Base):
     payment_instructions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class PaymentProof(Base):
+    __tablename__ = "payment_proofs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id", ondelete="CASCADE"), nullable=False)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_size: Mapped[int] = mapped_column(nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class PaymentWebhookEvent(Base):
     __tablename__ = "payment_webhook_events"
     __table_args__ = (UniqueConstraint("provider", "request_id", name="uq_payment_webhook_provider_request"),)

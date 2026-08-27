@@ -1,6 +1,8 @@
 import json
 import asyncio
 import uuid
+import re
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -9,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.modules.payments import schemas
-from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentStatus, PaymentWebhookEvent
+from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
@@ -26,6 +28,69 @@ from app.modules.business_matching.models import Notification
 
 
 class PaymentService:
+    PAYMENT_PROOF_MIMES = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
+    MAX_PAYMENT_PROOF_SIZE = 10 * 1024 * 1024
+
+    @staticmethod
+    async def submit_manual_payment_proof(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID, payment_method: str, transfer_reference: str | None, notes: str | None, file) -> tuple[Payment, PaymentProof]:
+        order = await session.get(Order, order_id, with_for_update=True)
+        if not order or order.user_id != user_id:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        if order.status == OrderStatus.PAID:
+            raise ConflictException("ORDER_ALREADY_PAID", "Order sudah dibayar")
+        if order.status in {OrderStatus.CANCELED, OrderStatus.EXPIRED}:
+            raise ConflictException("ORDER_NOT_PAYABLE", "Order dibatalkan atau kedaluwarsa")
+        if payment_method not in {"manual_transfer", "manual_qr_code"}:
+            raise ValidationException("INVALID_MANUAL_PAYMENT_METHOD", "Metode harus manual_transfer atau manual_qr_code")
+        transfer_reference = transfer_reference.strip() if transfer_reference else None
+        notes = notes.strip() if notes else None
+        if transfer_reference and len(transfer_reference) > 128:
+            raise ValidationException("INVALID_TRANSFER_REFERENCE", "Referensi transfer maksimal 128 karakter")
+        if notes and len(notes) > 1000:
+            raise ValidationException("INVALID_PAYMENT_PROOF_NOTES", "Catatan maksimal 1000 karakter")
+        mime_type = file.content_type or ""
+        extension = PaymentService.PAYMENT_PROOF_MIMES.get(mime_type)
+        if not extension:
+            raise ValidationException("INVALID_PAYMENT_PROOF_MIME", "Bukti pembayaran harus JPG, PNG, atau PDF")
+        content = await file.read(PaymentService.MAX_PAYMENT_PROOF_SIZE + 1)
+        await file.close()
+        if not content or len(content) > PaymentService.MAX_PAYMENT_PROOF_SIZE:
+            raise ValidationException("INVALID_PAYMENT_PROOF_SIZE", "Bukti pembayaran kosong atau melebihi 10 MB")
+
+        payment = (await session.execute(select(Payment).where(
+            Payment.order_id == order.id,
+            Payment.provider.in_(["manual_transfer", "manual_qr_code"]),
+        ).order_by(Payment.created_at.desc()).with_for_update())).scalars().first()
+        if payment is None:
+            payment = Payment(order_id=order.id, provider=payment_method, gross_amount=order.total_amount, currency=order.currency)
+            session.add(payment)
+            await session.flush()
+        payment.provider = payment_method
+        payment.provider_order_id = order.order_number
+        payment.provider_transaction_id = transfer_reference or payment.provider_transaction_id
+        payment.provider_reference_no = transfer_reference or payment.provider_reference_no
+        payment.payment_type = "qrcode" if payment_method == "manual_qr_code" else "bank_transfer"
+        payment.channel_code = "MANUAL_QRIS" if payment_method == "manual_qr_code" else "MANUAL_TRANSFER"
+        payment.transaction_status = PaymentStatus.PENDING
+        if order.status == OrderStatus.DRAFT:
+            order.status = OrderStatus.PENDING
+
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(file.filename or "payment-proof").name)[:255]
+        storage_key = f"payment-proofs/{order.id}/{uuid.uuid4()}{extension}"
+        target = Path(".private_uploads").resolve() / storage_key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        proof = PaymentProof(payment_id=payment.id, uploaded_by=user_id, original_filename=safe_name, storage_key=storage_key, mime_type=mime_type, file_size=len(content), notes=notes)
+        session.add(proof)
+        await PaymentService._notify_payment_status(session, order, payment, user_id)
+        try:
+            await session.commit()
+        except Exception:
+            if target.is_file():
+                target.unlink()
+            raise
+        await session.refresh(proof)
+        return payment, proof
     @staticmethod
     def _reusable_midtrans_token(payment: Payment | None, now: datetime | None = None) -> str:
         """Return a Snap token only while the local payment window is still open."""

@@ -12,7 +12,7 @@ from sqlalchemy.orm import aliased
 
 from app.modules.events.models import Event
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
-from app.modules.payments.models import Order, Payment, PaymentStatus
+from app.modules.payments.models import Order, Payment, PaymentProof, PaymentStatus
 from app.modules.registrations.models import Registration
 from app.modules.store.models import OrderItem, Product
 
@@ -79,6 +79,7 @@ class PaymentReportingService:
         stmt = (
             select(
                 Payment.id.label("payment_id"),
+                Payment.provider,
                 Payment.created_at,
                 Payment.paid_at,
                 Payment.transaction_status,
@@ -119,6 +120,8 @@ class PaymentReportingService:
         )
         if provider == "doku":
             stmt = stmt.where(Payment.provider.like("doku%"))
+        elif provider == "manual":
+            stmt = stmt.where(Payment.provider.in_(["manual_transfer", "manual_qr_code"]))
         elif provider:
             stmt = stmt.where(Payment.provider == provider)
         if event_id:
@@ -135,7 +138,31 @@ class PaymentReportingService:
             stmt = stmt.where(effective_package_id == package_id)
 
         result = await session.execute(stmt)
-        return [dict(row._mapping) for row in result.all()]
+        rows = [dict(row._mapping) for row in result.all()]
+        payment_ids = [row["payment_id"] for row in rows]
+        if not payment_ids:
+            return rows
+        proofs = (await session.execute(
+            select(PaymentProof)
+            .where(PaymentProof.payment_id.in_(payment_ids))
+            .order_by(PaymentProof.created_at.desc())
+        )).scalars().all()
+        proofs_by_payment: dict[UUID, list[dict[str, Any]]] = defaultdict(list)
+        for proof in proofs:
+            proofs_by_payment[proof.payment_id].append({
+                "id": proof.id,
+                "original_filename": proof.original_filename,
+                "mime_type": proof.mime_type,
+                "file_size": proof.file_size,
+                "notes": proof.notes,
+                "uploaded_by": proof.uploaded_by,
+                "created_at": proof.created_at,
+                "download_url": f"/api/v1/payments/manual-proofs/{proof.id}/download",
+            })
+        for row in rows:
+            row["payment_proofs"] = proofs_by_payment.get(row["payment_id"], [])
+            row["payment_proof_count"] = len(row["payment_proofs"])
+        return rows
 
     @staticmethod
     def build_report(rows: list[dict[str, Any]], *, limit: int, offset: int) -> dict[str, Any]:
@@ -203,7 +230,7 @@ class PaymentReportingService:
 
     @staticmethod
     def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
-        return {
+        serialized = {
             key: (
                 value.isoformat()
                 if isinstance(value, datetime)
@@ -215,19 +242,29 @@ class PaymentReportingService:
             )
             for key, value in row.items()
         }
+        if "payment_proofs" in row:
+            serialized["payment_proofs"] = [
+                PaymentReportingService.serialize_row(proof) for proof in row["payment_proofs"]
+            ]
+        return serialized
 
     @staticmethod
     def csv(rows: list[dict[str, Any]]) -> str:
         output = io.StringIO(newline="")
         columns = [
-            "payment_id", "created_at", "paid_at", "transaction_status", "payment_type",
+            "payment_id", "created_at", "paid_at", "provider", "transaction_status", "payment_type",
             "channel_code", "gross_amount", "currency", "provider_transaction_id",
             "provider_order_id", "provider_reference_no", "virtual_account_no", "order_id", "order_number",
             "order_status", "registration_id", "registration_number", "event_id", "event_name",
             "customer_name", "customer_email", "package_id", "package_code", "package_name",
+            "payment_proof_count", "payment_proof_download_urls",
         ]
         writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow(PaymentReportingService.serialize_row(row))
+            serialized = PaymentReportingService.serialize_row(row)
+            serialized["payment_proof_download_urls"] = " | ".join(
+                proof["download_url"] for proof in serialized.get("payment_proofs", [])
+            )
+            writer.writerow(serialized)
         return output.getvalue()

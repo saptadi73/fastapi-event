@@ -79,6 +79,28 @@ class PaymentReportingTests(unittest.TestCase):
         self.assertIn("provider_order_id", content)
         self.assertIn("ORD-TEST-MT-ABC12345", content)
 
+    def test_report_serializes_payment_proof_download_link(self):
+        row = payment_row("pending", "10000.00", "MANUAL_TRANSFER")
+        proof_id = uuid.uuid4()
+        row["provider"] = "manual_transfer"
+        row["payment_proof_count"] = 1
+        row["payment_proofs"] = [{
+            "id": proof_id,
+            "original_filename": "receipt.jpg",
+            "mime_type": "image/jpeg",
+            "file_size": 1200,
+            "notes": None,
+            "uploaded_by": uuid.uuid4(),
+            "created_at": row["created_at"],
+            "download_url": f"/api/v1/payments/manual-proofs/{proof_id}/download",
+        }]
+
+        transaction = PaymentReportingService.build_report([row], limit=10, offset=0)["transactions"][0]
+
+        self.assertEqual(transaction["payment_proof_count"], 1)
+        self.assertEqual(transaction["payment_proofs"][0]["id"], str(proof_id))
+        self.assertIn(str(proof_id), transaction["payment_proofs"][0]["download_url"])
+
 
 class PaymentReportingQueryTests(unittest.IsolatedAsyncioTestCase):
     async def test_store_order_context_supports_event_and_package_filters(self):

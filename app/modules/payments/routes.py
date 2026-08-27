@@ -2,8 +2,9 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -17,7 +18,7 @@ from app.modules.payments.midtrans import verify_pay_account_signature
 from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
 from app.core.exceptions import AppException, ValidationException
 from app.core.config import get_settings
-from app.modules.payments.models import PaymentChannel, PaymentWebhookCapture
+from app.modules.payments.models import Order, Payment, PaymentChannel, PaymentProof, PaymentWebhookCapture
 from app.core.exceptions import NotFoundException
 from app.modules.email_notifications.service import deliver_payment_for_order
 
@@ -113,6 +114,57 @@ async def confirm_manual_payment(order_id: uuid.UUID, payload: schemas.ManualPay
     order, payment = await PaymentService.confirm_manual_payment(db, order_id, payload, admin.id)
     background_tasks.add_task(deliver_payment_for_order, order.id)
     return success_response("Pembayaran transfer manual berhasil dikonfirmasi", data={"order": schemas.OrderRead.model_validate(order), "payment": schemas.PaymentRead.model_validate(payment)}, request=request)
+
+
+@router.post("/payments/orders/{order_id}/manual-proof", status_code=201, summary="Upload manual transfer or static QRIS proof")
+async def upload_manual_payment_proof(
+    order_id: uuid.UUID,
+    request: Request,
+    payment_method: str = Form(...),
+    transfer_reference: str | None = Form(None),
+    notes: str | None = Form(None),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    payment, proof = await PaymentService.submit_manual_payment_proof(db, order_id, current_user.id, payment_method, transfer_reference, notes, file)
+    return success_response("Bukti pembayaran diterima dan menunggu verifikasi", data={"payment": schemas.PaymentRead.model_validate(payment), "proof": schemas.PaymentProofRead.model_validate(proof)}, request=request)
+
+
+async def _accessible_payment_proof(db: AsyncSession, proof_id: uuid.UUID, user: User, admin_access: bool = False) -> PaymentProof:
+    proof = await db.get(PaymentProof, proof_id)
+    payment = await db.get(Payment, proof.payment_id) if proof else None
+    order = await db.get(Order, payment.order_id) if payment else None
+    allowed = bool(order and (order.user_id == user.id or (admin_access and user.role in {"admin", "organizer"})))
+    if not proof or not allowed:
+        raise NotFoundException("PAYMENT_PROOF_NOT_FOUND", "Bukti pembayaran tidak ditemukan")
+    return proof
+
+
+@router.get("/payments/orders/{order_id}/manual-proofs", summary="List own manual payment proofs")
+async def list_manual_payment_proofs(order_id: uuid.UUID, request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    order = await db.get(Order, order_id)
+    if not order or order.user_id != current_user.id:
+        raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+    rows = (await db.execute(select(PaymentProof).join(Payment, Payment.id == PaymentProof.payment_id).where(Payment.order_id == order_id).order_by(PaymentProof.created_at.desc()))).scalars().all()
+    return success_response("Bukti pembayaran ditemukan", data=[schemas.PaymentProofRead.model_validate(row) for row in rows], request=request)
+
+
+@router.get("/payments/manual-proofs/{proof_id}/download")
+async def download_manual_payment_proof(proof_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    proof = await _accessible_payment_proof(db, proof_id, current_user, admin_access=True)
+    path = Path(".private_uploads").resolve() / proof.storage_key
+    if not path.is_file():
+        raise NotFoundException("PAYMENT_PROOF_FILE_NOT_FOUND", "File bukti pembayaran tidak ditemukan")
+    return FileResponse(path, media_type=proof.mime_type, filename=proof.original_filename)
+
+
+@router.get("/admin/orders/{order_id}/manual-proofs", summary="List manual proofs for verification")
+async def admin_list_manual_payment_proofs(order_id: uuid.UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    if not await db.get(Order, order_id):
+        raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan")
+    rows = (await db.execute(select(PaymentProof).join(Payment, Payment.id == PaymentProof.payment_id).where(Payment.order_id == order_id).order_by(PaymentProof.created_at.desc()))).scalars().all()
+    return success_response("Bukti pembayaran untuk verifikasi ditemukan", data=[schemas.PaymentProofRead.model_validate(row) for row in rows], request=request)
 
 
 @router.get("/payments/doku/direct/methods", summary="List configured DOKU Direct payment methods")
@@ -375,6 +427,44 @@ async def admin_midtrans_payment_report_csv(
         content=PaymentReportingService.csv(rows), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/admin/reports/payments/manual", summary="Manual transfer and static QRIS payment report")
+async def admin_manual_payment_report(
+    request: Request,
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    organizer: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "manual")
+    return success_response(
+        "Laporan pembayaran manual berhasil diambil",
+        data=PaymentReportingService.build_report(rows, limit=limit, offset=offset),
+        meta={"total": len(rows), "limit": limit, "offset": offset}, request=request,
+    )
+
+
+@router.get("/admin/reports/payments/manual.csv", summary="Export manual payment report as CSV")
+async def admin_manual_payment_report_csv(
+    event_id: uuid.UUID | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    status: str | None = Query(default=None),
+    channel_code: str | None = Query(default=None),
+    package_id: uuid.UUID | None = Query(default=None),
+    organizer: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "manual")
+    filename = f"iwbif-manual-payments-{datetime.now().date().isoformat()}.csv"
+    return Response(content=PaymentReportingService.csv(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/admin/reports/payments", summary="DOKU payment and revenue report")

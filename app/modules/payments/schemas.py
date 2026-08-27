@@ -23,6 +23,19 @@ class ManualPaymentConfirmRequest(BaseModel):
     paid_at: datetime | None = None
 
 
+class PaymentProofRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    payment_id: UUID
+    uploaded_by: UUID
+    original_filename: str
+    mime_type: str
+    file_size: int
+    notes: str | None = None
+    created_at: datetime
+
+
 class PaymentChannelWrite(BaseModel):
     provider: str = "doku"
     code: str
