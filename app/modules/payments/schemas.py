@@ -23,6 +23,12 @@ class ManualPaymentConfirmRequest(BaseModel):
     paid_at: datetime | None = None
 
 
+class TransactionStatusUpdateRequest(BaseModel):
+    status: Literal["paid", "success", "cancelled"]
+    notes: str | None = Field(default=None, max_length=1000)
+    paid_at: datetime | None = None
+
+
 class PaymentProofRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

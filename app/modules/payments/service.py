@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.modules.payments import schemas
 from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent
@@ -183,6 +183,104 @@ class PaymentService:
         await session.commit()
         await session.refresh(manual_payment)
         return order, manual_payment
+
+    @staticmethod
+    async def update_transaction_status(
+        session: AsyncSession,
+        payment_id: uuid.UUID,
+        payload: schemas.TransactionStatusUpdateRequest,
+        actor_user_id: uuid.UUID,
+    ) -> tuple[Order, Payment]:
+        payment = await session.get(Payment, payment_id, with_for_update=True)
+        if not payment:
+            raise NotFoundException("PAYMENT_NOT_FOUND", "Transaksi pembayaran tidak ditemukan")
+        order = await session.get(Order, payment.order_id, with_for_update=True)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order transaksi tidak ditemukan")
+
+        now = datetime.now(timezone.utc)
+        requested_status = payload.status.lower()
+        if requested_status in {"paid", "success"}:
+            payment.transaction_status = PaymentStatus.SUCCESS
+            payment.paid_at = payload.paid_at or payment.paid_at or now
+            order.status = OrderStatus.PAID
+            if order.registration_id:
+                registration = await session.get(Registration, order.registration_id, with_for_update=True)
+                if registration and registration.status != RegistrationStatus.CONFIRMED:
+                    registration.status = RegistrationStatus.PAID
+            event_status = "SUCCESS"
+        else:
+            payment.transaction_status = PaymentStatus.CANCELLED
+            payment.paid_at = None
+            another_success = bool((await session.execute(
+                select(Payment.id).where(
+                    Payment.order_id == order.id,
+                    Payment.id != payment.id,
+                    Payment.transaction_status == PaymentStatus.SUCCESS,
+                ).limit(1)
+            )).scalar_one_or_none())
+            order.status = OrderStatus.PAID if another_success else OrderStatus.CANCELED
+            if order.registration_id and not another_success:
+                registration = await session.get(Registration, order.registration_id, with_for_update=True)
+                if registration and registration.status == RegistrationStatus.PAID:
+                    registration.status = RegistrationStatus.PAYMENT_PENDING
+            event_status = "CANCELLED"
+
+        audit_payload = {
+            "updated_by": str(actor_user_id),
+            "requested_status": requested_status,
+            "transaction_status": payment.transaction_status,
+            "notes": payload.notes,
+            "updated_at": now.isoformat(),
+        }
+        session.add(PaymentWebhookEvent(
+            payment_id=payment.id,
+            provider=payment.provider,
+            request_id=f"organizer-{uuid.uuid4().hex}",
+            event_status=event_status,
+            payload=audit_payload,
+        ))
+        await PaymentService._notify_payment_status(session, order, payment, actor_user_id)
+        await session.commit()
+        await session.refresh(payment)
+        return order, payment
+
+    @staticmethod
+    async def delete_transaction(session: AsyncSession, payment_id: uuid.UUID) -> tuple[uuid.UUID, list[Path]]:
+        payment = await session.get(Payment, payment_id, with_for_update=True)
+        if not payment:
+            raise NotFoundException("PAYMENT_NOT_FOUND", "Transaksi pembayaran tidak ditemukan")
+        order_id = payment.order_id
+        order = await session.get(Order, order_id, with_for_update=True)
+        proofs = (await session.execute(
+            select(PaymentProof).where(PaymentProof.payment_id == payment.id)
+        )).scalars().all()
+        proof_root = Path(".private_uploads").resolve()
+        proof_paths = []
+        for proof in proofs:
+            candidate = (proof_root / proof.storage_key).resolve()
+            if candidate == proof_root or proof_root in candidate.parents:
+                proof_paths.append(candidate)
+
+        await session.execute(delete(PaymentWebhookEvent).where(PaymentWebhookEvent.payment_id == payment.id))
+        await session.execute(delete(PaymentProof).where(PaymentProof.payment_id == payment.id))
+        await session.delete(payment)
+        await session.flush()
+
+        remaining_success = bool((await session.execute(
+            select(Payment.id).where(
+                Payment.order_id == order_id,
+                Payment.transaction_status == PaymentStatus.SUCCESS,
+            ).limit(1)
+        )).scalar_one_or_none())
+        if order:
+            order.status = OrderStatus.PAID if remaining_success else OrderStatus.PENDING
+            if order.registration_id and not remaining_success:
+                registration = await session.get(Registration, order.registration_id, with_for_update=True)
+                if registration and registration.status == RegistrationStatus.PAID:
+                    registration.status = RegistrationStatus.PAYMENT_PENDING
+        await session.commit()
+        return order_id, proof_paths
 
     @staticmethod
     async def create_doku_qris(session: AsyncSession, payload: schemas.CreateDokuQrisRequest, user_id: uuid.UUID) -> schemas.DokuQrisResponse:

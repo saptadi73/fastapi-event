@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.dialects import postgresql
 
 from app.modules.payments.reporting import PaymentReportingService
+from app.modules.payments.schemas import TransactionStatusUpdateRequest
 
 
 def payment_row(status: str, amount: str, channel: str, package_code: str = "PKG-A"):
@@ -40,6 +41,17 @@ def payment_row(status: str, amount: str, channel: str, package_code: str = "PKG
 
 
 class PaymentReportingTests(unittest.TestCase):
+    def test_organizer_status_contract_accepts_paid_success_and_cancelled(self):
+        for status in ("paid", "success", "cancelled"):
+            self.assertEqual(status, TransactionStatusUpdateRequest(status=status).status)
+
+    def test_cancelled_transaction_is_not_counted_as_revenue(self):
+        report = PaymentReportingService.build_report(
+            [payment_row("cancelled", "10000.00", "MIDTRANS")], limit=10, offset=0
+        )
+        self.assertEqual(0, report["summary"]["successful_transactions"])
+        self.assertEqual(0, report["summary"]["gross_revenue"])
+
     def test_store_first_payment_without_registration_still_counts(self):
         row = payment_row("success", "10000.00", "MIDTRANS")
         for key in (

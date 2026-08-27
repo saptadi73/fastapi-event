@@ -80,7 +80,7 @@ class DokuSnapNotificationTests(unittest.IsolatedAsyncioTestCase):
                 async def get(model, identifier, **kwargs):
                     return order if model is Order else registration
                 session.get.side_effect = get
-                with patch("app.modules.payments.service.PaymentRepository.get_payment_by_va", AsyncMock(return_value=payment)), patch("app.modules.payments.service.PaymentRepository.get_webhook_event", AsyncMock(return_value=None)):
+                with patch("app.modules.payments.service.PaymentRepository.get_payment_by_va", AsyncMock(return_value=payment)), patch("app.modules.payments.service.PaymentRepository.get_webhook_event", AsyncMock(return_value=None)), patch("app.modules.payments.service.PaymentService._admin_user_ids", AsyncMock(return_value=[])):
                     response = await PaymentService.handle_doku_snap_va_notification(session, payload, headers)
                 self.assertEqual("2002500", response["responseCode"])
                 self.assertEqual("success", payment.transaction_status)

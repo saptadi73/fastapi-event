@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.payments.models import Order, Payment
 from app.modules.payments.service import PaymentService
@@ -19,6 +19,7 @@ class PaymentNotificationTests(unittest.IsolatedAsyncioTestCase):
         registration = Registration(id=registration_id, event_id=event_id, participant_id=uuid.uuid4(), status="awaiting_payment")
 
         session = AsyncMock()
+        session.add = MagicMock()
         session.get = AsyncMock(return_value=registration)
 
         with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id])):
@@ -42,6 +43,7 @@ class PaymentNotificationTests(unittest.IsolatedAsyncioTestCase):
         registration = Registration(id=registration_id, event_id=event_id, participant_id=uuid.uuid4(), status="awaiting_payment")
 
         session = AsyncMock()
+        session.add = MagicMock()
         session.get = AsyncMock(return_value=registration)
 
         with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id, owner_user_id])):

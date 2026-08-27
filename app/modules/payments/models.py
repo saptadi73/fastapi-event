@@ -22,6 +22,7 @@ class PaymentStatus(str):
     FAILED = "failed"
     EXPIRED = "expired"
     REFUNDED = "refunded"
+    CANCELLED = "cancelled"
 
 
 class Order(Base):

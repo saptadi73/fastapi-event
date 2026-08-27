@@ -1346,6 +1346,34 @@ Untuk production, gunakan production Server/Client Key dan ubah
 
 ### Laporan pembayaran dan pendapatan organizer
 
+### Pengelolaan seluruh transaksi oleh organizer
+
+Endpoint berikut mencakup pembayaran manual, DOKU, Midtrans, dan provider lain.
+Seluruhnya memerlukan role `admin` atau `organizer`:
+
+```text
+GET    /api/v1/admin/transactions
+PATCH  /api/v1/admin/transactions/{payment_id}/status
+DELETE /api/v1/admin/transactions/{payment_id}
+```
+
+Endpoint daftar menerima filter `event_id`, `date_from`, `date_to`, `status`,
+`provider`, `channel_code`, `package_id`, `limit`, dan `offset`. Tanpa
+`provider`, semua provider dikembalikan.
+
+Payload perubahan status:
+
+```json
+{"status":"paid","notes":"Sudah diverifikasi pada rekening/gateway"}
+```
+
+Status yang diterima adalah `paid`, `success`, dan `cancelled`. `paid` dan
+`success` sama-sama menghasilkan status payment `success` dan order `paid`;
+`cancelled` menghasilkan status payment `cancelled` dan membatalkan order jika
+tidak ada transaksi sukses lain. Perubahan dicatat sebagai audit event. Delete
+juga membersihkan audit event dan bukti pembayaran milik transaksi, lalu
+menyelaraskan kembali status order/registrasi.
+
 Laporan DOKU dan Midtrans dipisahkan agar referensi transaksi, channel, dan CSV
 tidak tercampur. Semua endpoint berikut memerlukan Bearer token dengan role
 `admin` atau `organizer`:

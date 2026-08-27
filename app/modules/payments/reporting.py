@@ -24,6 +24,7 @@ PAYMENT_STATUSES = {
     PaymentStatus.FAILED,
     PaymentStatus.EXPIRED,
     PaymentStatus.REFUNDED,
+    PaymentStatus.CANCELLED,
 }
 
 
@@ -42,7 +43,7 @@ class PaymentReportingService:
         status: str | None = None,
         channel_code: str | None = None,
         package_id: UUID | None = None,
-        provider: str = "doku",
+        provider: str | None = "doku",
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
         store_product = aliased(Product)
