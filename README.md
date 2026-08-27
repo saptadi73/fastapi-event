@@ -30,6 +30,10 @@ provider melalui `GET /api/v1/admin/transactions`. Role `admin` dan `organizer`
 dapat merekonsiliasi transaksi manual maupun payment gateway melalui
 `PATCH /api/v1/admin/transactions/{payment_id}/status`, atau menghapus transaksi
 yang tidak lagi diperlukan melalui `DELETE /api/v1/admin/transactions/{payment_id}`.
+Delete pembayaran bersifat soft-delete dan mempertahankan audit. Operasi massal
+tersedia melalui `POST /api/v1/admin/transactions/bulk-actions`.
+Setiap transaksi mengirim `allowed_actions`, sehingga frontend tidak perlu
+menduplikasi aturan transisi status.
 Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
 
 Dokumen acuan:

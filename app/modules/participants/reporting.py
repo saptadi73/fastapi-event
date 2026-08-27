@@ -78,7 +78,7 @@ class ParticipantReportingService:
 
             payments = (await db.execute(
                 select(Payment)
-                .where(Payment.order_id.in_(order_ids))
+                .where(Payment.order_id.in_(order_ids), Payment.deleted_at.is_(None))
                 .order_by(Payment.order_id, Payment.created_at.desc(), Payment.id.desc())
             )).scalars().all()
             for payment in payments:

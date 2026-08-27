@@ -311,6 +311,21 @@ payments
 - paid_at
 ```
 
+### Organizer payment reconciliation contract
+
+Dashboard organizer mengambil transaksi seluruh provider melalui
+`GET /api/v1/admin/transactions`. Setiap item wajib memuat `payment_id`,
+`order_id`, `order_number`, `provider`, `transaction_status`, `order_status`, dan
+`allowed_actions`. Frontend harus membentuk tombol dari `allowed_actions`, bukan
+menduplikasi matriks transisi backend.
+
+Status pembatalan canonical untuk domain payment adalah `canceled`. Aksi
+`paid`/`success` menulis payment `success`; transaksi `success` dan `refunded`
+tidak dapat dibatalkan atau dihapus. `DELETE /api/v1/admin/transactions/{id}`
+adalah soft-delete dan mempertahankan audit serta bukti pembayaran. Operasi
+atomik sampai 500 transaksi tersedia melalui
+`POST /api/v1/admin/transactions/bulk-actions`.
+
 ## 4.11 Declaration
 
 Required declarations:

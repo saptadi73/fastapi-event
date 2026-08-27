@@ -12,7 +12,7 @@ from sqlalchemy.orm import aliased
 
 from app.modules.events.models import Event
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
-from app.modules.payments.models import Order, Payment, PaymentProof, PaymentStatus
+from app.modules.payments.models import Order, Payment, PaymentProof, PaymentStatus, payment_allowed_actions
 from app.modules.registrations.models import Registration
 from app.modules.store.models import OrderItem, Product
 
@@ -24,7 +24,7 @@ PAYMENT_STATUSES = {
     PaymentStatus.FAILED,
     PaymentStatus.EXPIRED,
     PaymentStatus.REFUNDED,
-    PaymentStatus.CANCELLED,
+    PaymentStatus.CANCELED,
 }
 
 
@@ -44,6 +44,7 @@ class PaymentReportingService:
         channel_code: str | None = None,
         package_id: UUID | None = None,
         provider: str | None = "doku",
+        include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
         store_product = aliased(Product)
@@ -92,6 +93,9 @@ class PaymentReportingService:
                 Payment.provider_order_id,
                 Payment.provider_reference_no,
                 Payment.virtual_account_no,
+                Payment.deleted_at,
+                Payment.deleted_by,
+                Payment.deletion_reason,
                 Order.id.label("order_id"),
                 Order.order_number,
                 Order.status.label("order_status"),
@@ -119,6 +123,8 @@ class PaymentReportingService:
             )
             .order_by(effective_at.desc(), Payment.id.desc())
         )
+        if not include_deleted:
+            stmt = stmt.where(Payment.deleted_at.is_(None))
         if provider == "doku":
             stmt = stmt.where(Payment.provider.like("doku%"))
         elif provider == "manual":
@@ -163,6 +169,9 @@ class PaymentReportingService:
         for row in rows:
             row["payment_proofs"] = proofs_by_payment.get(row["payment_id"], [])
             row["payment_proof_count"] = len(row["payment_proofs"])
+            row["allowed_actions"] = payment_allowed_actions(
+                str(row["transaction_status"]), row.get("deleted_at")
+            )
         return rows
 
     @staticmethod

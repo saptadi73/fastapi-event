@@ -370,6 +370,7 @@ async def _payment_report_rows(
     channel_code: str | None,
     package_id: uuid.UUID | None,
     provider: str | None = "doku",
+    include_deleted: bool = False,
 ):
     if date_from and date_to and date_from > date_to:
         raise ValidationException("INVALID_REPORT_PERIOD", "date_from tidak boleh sesudah date_to")
@@ -385,6 +386,7 @@ async def _payment_report_rows(
         channel_code=channel_code,
         package_id=package_id,
         provider=provider,
+        include_deleted=include_deleted,
     )
 
 
@@ -400,12 +402,13 @@ async def admin_all_transactions(
     package_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    include_deleted: bool = Query(default=False),
     organizer: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
     rows = await _payment_report_rows(
         db, event_id, date_from, date_to, status, channel_code, package_id,
-        provider.strip().lower() if provider else None,
+        provider.strip().lower() if provider else None, include_deleted,
     )
     return success_response(
         "Semua transaksi pembayaran berhasil diambil",
@@ -438,16 +441,51 @@ async def admin_update_transaction_status(
 async def admin_delete_transaction(
     payment_id: uuid.UUID,
     request: Request,
+    reason: str | None = Query(default=None, max_length=1000),
     organizer: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    order_id, proof_paths = await PaymentService.delete_transaction(db, payment_id)
-    for path in proof_paths:
-        if path.is_file():
-            path.unlink()
+    order, payment = await PaymentService.delete_transaction(db, payment_id, organizer.id, reason)
     return success_response(
-        "Transaksi pembayaran berhasil dihapus",
-        data={"payment_id": str(payment_id), "order_id": str(order_id)},
+        "Transaksi pembayaran berhasil dihapus secara soft-delete",
+        data={
+            "payment_id": str(payment.id), "order_id": str(order.id),
+            "deleted_at": payment.deleted_at, "deleted_by": str(payment.deleted_by),
+            "allowed_actions": payment.allowed_actions,
+        },
+        request=request,
+    )
+
+
+@router.post("/admin/transactions/bulk-actions", summary="Bulk confirm, cancel, or soft-delete transactions")
+async def admin_bulk_transaction_action(
+    payload: schemas.TransactionBulkActionRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    organizer: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    results = await PaymentService.bulk_transaction_action(db, payload, organizer.id)
+    if payload.action in {"paid", "success"}:
+        for order, _ in results:
+            background_tasks.add_task(deliver_payment_for_order, order.id)
+    return success_response(
+        "Bulk action transaksi pembayaran berhasil",
+        data={
+            "action": payload.action,
+            "processed": len(results),
+            "transactions": [
+                {
+                    "payment_id": str(payment.id),
+                    "order_id": str(order.id),
+                    "transaction_status": payment.transaction_status,
+                    "order_status": order.status,
+                    "deleted_at": payment.deleted_at,
+                    "allowed_actions": payment.allowed_actions,
+                }
+                for order, payment in results
+            ],
+        },
         request=request,
     )
 

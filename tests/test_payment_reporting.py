@@ -41,13 +41,13 @@ def payment_row(status: str, amount: str, channel: str, package_code: str = "PKG
 
 
 class PaymentReportingTests(unittest.TestCase):
-    def test_organizer_status_contract_accepts_paid_success_and_cancelled(self):
-        for status in ("paid", "success", "cancelled"):
+    def test_organizer_status_contract_accepts_paid_success_and_canceled(self):
+        for status in ("paid", "success", "canceled"):
             self.assertEqual(status, TransactionStatusUpdateRequest(status=status).status)
 
-    def test_cancelled_transaction_is_not_counted_as_revenue(self):
+    def test_canceled_transaction_is_not_counted_as_revenue(self):
         report = PaymentReportingService.build_report(
-            [payment_row("cancelled", "10000.00", "MIDTRANS")], limit=10, offset=0
+            [payment_row("canceled", "10000.00", "MIDTRANS")], limit=10, offset=0
         )
         self.assertEqual(0, report["summary"]["successful_transactions"])
         self.assertEqual(0, report["summary"]["gross_revenue"])

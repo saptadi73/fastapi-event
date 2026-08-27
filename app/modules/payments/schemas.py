@@ -24,9 +24,22 @@ class ManualPaymentConfirmRequest(BaseModel):
 
 
 class TransactionStatusUpdateRequest(BaseModel):
-    status: Literal["paid", "success", "cancelled"]
+    status: Literal["paid", "success", "canceled"]
     notes: str | None = Field(default=None, max_length=1000)
     paid_at: datetime | None = None
+
+
+class TransactionBulkActionRequest(BaseModel):
+    payment_ids: list[UUID] = Field(min_length=1, max_length=500)
+    action: Literal["paid", "success", "canceled", "delete"]
+    notes: str | None = Field(default=None, max_length=1000)
+    paid_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_unique_payment_ids(self):
+        if len(set(self.payment_ids)) != len(self.payment_ids):
+            raise ValueError("payment_ids must not contain duplicates")
+        return self
 
 
 class PaymentProofRead(BaseModel):
@@ -185,6 +198,10 @@ class PaymentRead(BaseModel):
     virtual_account_no: str | None = None
     provider_reference_no: str | None = None
     payment_instructions_url: str | None = None
+    deleted_at: datetime | None = None
+    deleted_by: UUID | None = None
+    deletion_reason: str | None = None
+    allowed_actions: list[str] = Field(default_factory=list)
 
 
 class InvoiceRegistration(BaseModel):

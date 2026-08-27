@@ -180,7 +180,10 @@ endpoint payment/order. Aksi manual ada pada admin:
 - Gunakan `GET /api/v1/admin/transactions`, lalu
   `PATCH /api/v1/admin/transactions/{payment_id}/status` saat rekonsiliasi
   transaksi manual maupun gateway diperlukan. Status yang diterima adalah
-  `paid`, `success`, dan `cancelled`.
+  `paid`, `success`, dan `canceled`. Untuk banyak transaksi gunakan
+  `POST /api/v1/admin/transactions/bulk-actions`.
+- Render aksi transaksi hanya dari `allowed_actions` yang dikirim backend;
+  jangan memetakan ulang aturan berdasarkan `transaction_status` di frontend.
 - `POST /api/v1/admin/orders/{order_id}/confirm-manual-payment` tetap tersedia
   khusus workflow manual lama berbasis order.
 - Lanjutkan menampilkan status “Menunggu validasi admin” pada akun user sampai

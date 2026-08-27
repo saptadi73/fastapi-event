@@ -8,10 +8,10 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.modules.payments import schemas
-from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent
+from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent, payment_allowed_actions
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
@@ -60,6 +60,7 @@ class PaymentService:
         payment = (await session.execute(select(Payment).where(
             Payment.order_id == order.id,
             Payment.provider.in_(["manual_transfer", "manual_qr_code"]),
+            Payment.deleted_at.is_(None),
         ).order_by(Payment.created_at.desc()).with_for_update())).scalars().first()
         if payment is None:
             payment = Payment(order_id=order.id, provider=payment_method, gross_amount=order.total_amount, currency=order.currency)
@@ -147,7 +148,11 @@ class PaymentService:
             raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan")
         manual_payment = (await session.execute(
             select(Payment)
-            .where(Payment.order_id == order.id, Payment.provider.in_(["manual_transfer", "manual_qr_code"]))
+            .where(
+                Payment.order_id == order.id,
+                Payment.provider.in_(["manual_transfer", "manual_qr_code"]),
+                Payment.deleted_at.is_(None),
+            )
             .order_by(Payment.created_at.desc())
             .with_for_update()
         )).scalars().first()
@@ -190,17 +195,28 @@ class PaymentService:
         payment_id: uuid.UUID,
         payload: schemas.TransactionStatusUpdateRequest,
         actor_user_id: uuid.UUID,
+        *,
+        commit: bool = True,
     ) -> tuple[Order, Payment]:
         payment = await session.get(Payment, payment_id, with_for_update=True)
         if not payment:
             raise NotFoundException("PAYMENT_NOT_FOUND", "Transaksi pembayaran tidak ditemukan")
+        if payment.deleted_at:
+            raise ConflictException("PAYMENT_DELETED", "Transaksi yang sudah dihapus tidak dapat diubah")
         order = await session.get(Order, payment.order_id, with_for_update=True)
         if not order:
             raise NotFoundException("ORDER_NOT_FOUND", "Order transaksi tidak ditemukan")
 
         now = datetime.now(timezone.utc)
         requested_status = payload.status.lower()
+        current_status = payment.transaction_status
+        allowed_actions = payment_allowed_actions(current_status, payment.deleted_at)
         if requested_status in {"paid", "success"}:
+            if requested_status not in allowed_actions:
+                raise ConflictException(
+                    "INVALID_PAYMENT_STATUS_TRANSITION",
+                    f"Transaksi berstatus {current_status} tidak dapat diubah menjadi success",
+                )
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = payload.paid_at or payment.paid_at or now
             order.status = OrderStatus.PAID
@@ -210,13 +226,19 @@ class PaymentService:
                     registration.status = RegistrationStatus.PAID
             event_status = "SUCCESS"
         else:
-            payment.transaction_status = PaymentStatus.CANCELLED
+            if requested_status not in allowed_actions:
+                raise ConflictException(
+                    "INVALID_PAYMENT_STATUS_TRANSITION",
+                    f"Transaksi berstatus {current_status} tidak dapat dibatalkan",
+                )
+            payment.transaction_status = PaymentStatus.CANCELED
             payment.paid_at = None
             another_success = bool((await session.execute(
                 select(Payment.id).where(
                     Payment.order_id == order.id,
                     Payment.id != payment.id,
                     Payment.transaction_status == PaymentStatus.SUCCESS,
+                    Payment.deleted_at.is_(None),
                 ).limit(1)
             )).scalar_one_or_none())
             order.status = OrderStatus.PAID if another_success else OrderStatus.CANCELED
@@ -224,7 +246,7 @@ class PaymentService:
                 registration = await session.get(Registration, order.registration_id, with_for_update=True)
                 if registration and registration.status == RegistrationStatus.PAID:
                     registration.status = RegistrationStatus.PAYMENT_PENDING
-            event_status = "CANCELLED"
+            event_status = "CANCELED"
 
         audit_payload = {
             "updated_by": str(actor_user_id),
@@ -241,46 +263,103 @@ class PaymentService:
             payload=audit_payload,
         ))
         await PaymentService._notify_payment_status(session, order, payment, actor_user_id)
-        await session.commit()
-        await session.refresh(payment)
+        if commit:
+            await session.commit()
+            await session.refresh(payment)
+        else:
+            await session.flush()
         return order, payment
 
     @staticmethod
-    async def delete_transaction(session: AsyncSession, payment_id: uuid.UUID) -> tuple[uuid.UUID, list[Path]]:
+    async def delete_transaction(
+        session: AsyncSession,
+        payment_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        reason: str | None = None,
+        *,
+        commit: bool = True,
+    ) -> tuple[Order, Payment]:
         payment = await session.get(Payment, payment_id, with_for_update=True)
         if not payment:
             raise NotFoundException("PAYMENT_NOT_FOUND", "Transaksi pembayaran tidak ditemukan")
+        if payment.deleted_at:
+            raise ConflictException("PAYMENT_ALREADY_DELETED", "Transaksi pembayaran sudah dihapus")
+        if "delete" not in payment_allowed_actions(payment.transaction_status, payment.deleted_at):
+            raise ConflictException(
+                "PAYMENT_DELETE_FORBIDDEN",
+                "Transaksi success atau refunded tidak boleh dihapus; pertahankan sebagai catatan keuangan",
+            )
         order_id = payment.order_id
         order = await session.get(Order, order_id, with_for_update=True)
-        proofs = (await session.execute(
-            select(PaymentProof).where(PaymentProof.payment_id == payment.id)
-        )).scalars().all()
-        proof_root = Path(".private_uploads").resolve()
-        proof_paths = []
-        for proof in proofs:
-            candidate = (proof_root / proof.storage_key).resolve()
-            if candidate == proof_root or proof_root in candidate.parents:
-                proof_paths.append(candidate)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order transaksi tidak ditemukan")
 
-        await session.execute(delete(PaymentWebhookEvent).where(PaymentWebhookEvent.payment_id == payment.id))
-        await session.execute(delete(PaymentProof).where(PaymentProof.payment_id == payment.id))
-        await session.delete(payment)
-        await session.flush()
+        now = datetime.now(timezone.utc)
+        payment.deleted_at = now
+        payment.deleted_by = actor_user_id
+        payment.deletion_reason = reason
+        session.add(PaymentWebhookEvent(
+            payment_id=payment.id,
+            provider=payment.provider,
+            request_id=f"organizer-delete-{uuid.uuid4().hex}",
+            event_status="SOFT_DELETED",
+            payload={
+                "deleted_by": str(actor_user_id),
+                "reason": reason,
+                "deleted_at": now.isoformat(),
+            },
+        ))
 
         remaining_success = bool((await session.execute(
             select(Payment.id).where(
                 Payment.order_id == order_id,
                 Payment.transaction_status == PaymentStatus.SUCCESS,
+                Payment.deleted_at.is_(None),
             ).limit(1)
         )).scalar_one_or_none())
-        if order:
-            order.status = OrderStatus.PAID if remaining_success else OrderStatus.PENDING
-            if order.registration_id and not remaining_success:
-                registration = await session.get(Registration, order.registration_id, with_for_update=True)
-                if registration and registration.status == RegistrationStatus.PAID:
-                    registration.status = RegistrationStatus.PAYMENT_PENDING
-        await session.commit()
-        return order_id, proof_paths
+        order.status = OrderStatus.PAID if remaining_success else OrderStatus.PENDING
+        if order.registration_id and not remaining_success:
+            registration = await session.get(Registration, order.registration_id, with_for_update=True)
+            if registration and registration.status == RegistrationStatus.PAID:
+                registration.status = RegistrationStatus.PAYMENT_PENDING
+        if commit:
+            await session.commit()
+            await session.refresh(payment)
+        else:
+            await session.flush()
+        return order, payment
+
+    @staticmethod
+    async def bulk_transaction_action(
+        session: AsyncSession,
+        payload: schemas.TransactionBulkActionRequest,
+        actor_user_id: uuid.UUID,
+    ) -> list[tuple[Order, Payment]]:
+        results: list[tuple[Order, Payment]] = []
+        try:
+            for payment_id in payload.payment_ids:
+                if payload.action == "delete":
+                    result = await PaymentService.delete_transaction(
+                        session, payment_id, actor_user_id, payload.notes, commit=False
+                    )
+                else:
+                    result = await PaymentService.update_transaction_status(
+                        session,
+                        payment_id,
+                        schemas.TransactionStatusUpdateRequest(
+                            status=payload.action, notes=payload.notes, paid_at=payload.paid_at
+                        ),
+                        actor_user_id,
+                        commit=False,
+                    )
+                results.append(result)
+            await session.commit()
+            for _, payment in results:
+                await session.refresh(payment)
+            return results
+        except Exception:
+            await session.rollback()
+            raise
 
     @staticmethod
     async def create_doku_qris(session: AsyncSession, payload: schemas.CreateDokuQrisRequest, user_id: uuid.UUID) -> schemas.DokuQrisResponse:

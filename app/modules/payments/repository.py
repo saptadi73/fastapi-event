@@ -126,7 +126,7 @@ class PaymentRepository:
 
     @staticmethod
     async def get_payment_by_order(session: AsyncSession, order_id: uuid.UUID, provider: str | None = None) -> Payment | None:
-        stmt = select(Payment).where(Payment.order_id == order_id)
+        stmt = select(Payment).where(Payment.order_id == order_id, Payment.deleted_at.is_(None))
         if provider:
             stmt = stmt.where(Payment.provider == provider)
         stmt = stmt.order_by(Payment.created_at.desc(), Payment.id.desc())
@@ -135,14 +135,14 @@ class PaymentRepository:
 
     @staticmethod
     async def get_payment_by_va(session: AsyncSession, virtual_account_no: str, lock: bool = False) -> Payment | None:
-        stmt = select(Payment).where(Payment.virtual_account_no == virtual_account_no)
+        stmt = select(Payment).where(Payment.virtual_account_no == virtual_account_no, Payment.deleted_at.is_(None))
         if lock:
             stmt = stmt.with_for_update()
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def get_payment_by_provider_order_id(session: AsyncSession, provider_order_id: str, lock: bool = False, provider: str | None = None) -> Payment | None:
-        stmt = select(Payment).where(Payment.provider_order_id == provider_order_id)
+        stmt = select(Payment).where(Payment.provider_order_id == provider_order_id, Payment.deleted_at.is_(None))
         if provider:
             stmt = stmt.where(Payment.provider == provider)
         if lock:
@@ -158,7 +158,7 @@ class PaymentRepository:
 
     @staticmethod
     async def get_payment_for_user(session: AsyncSession, payment_id: uuid.UUID, user_id: uuid.UUID) -> Payment | None:
-        stmt = (select(Payment).join(Order, Payment.order_id == Order.id).outerjoin(Registration, Order.registration_id == Registration.id).outerjoin(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Payment.id == payment_id, (Order.user_id == user_id) | (ParticipantProfile.user_id == user_id)))
+        stmt = (select(Payment).join(Order, Payment.order_id == Order.id).outerjoin(Registration, Order.registration_id == Registration.id).outerjoin(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Payment.id == payment_id, Payment.deleted_at.is_(None), (Order.user_id == user_id) | (ParticipantProfile.user_id == user_id)))
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod

@@ -90,10 +90,12 @@ Untuk admin/organizer, kasus mismatch dipush ke inbox notifikasi:
 - `POST /api/v1/admin/notifications/{id}/read`
 - `GET /api/v1/admin/transactions` untuk menemukan transaksi lintas provider.
 - `PATCH /api/v1/admin/transactions/{payment_id}/status` dengan status
-  `paid`, `success`, atau `cancelled` setelah hasil pada dashboard Midtrans
+  `paid`, `success`, atau `canceled` setelah hasil pada dashboard Midtrans
   diverifikasi. Jangan gunakan endpoint manual-order untuk transaksi Midtrans.
 - `DELETE /api/v1/admin/transactions/{payment_id}` hanya bila organizer memang
   perlu menghapus catatan transaksi; backend akan menyelaraskan status order.
+- Gunakan `allowed_actions` pada setiap transaksi untuk menentukan tombol yang
+  tersedia; jangan menduplikasi matriks status di frontend.
 
 Notifikasi yang umum dipakai untuk jalur ini:
 

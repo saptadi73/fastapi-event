@@ -22,7 +22,21 @@ class PaymentStatus(str):
     FAILED = "failed"
     EXPIRED = "expired"
     REFUNDED = "refunded"
-    CANCELLED = "cancelled"
+    CANCELED = "canceled"
+
+
+def payment_allowed_actions(status: str, deleted_at: datetime | None = None) -> list[str]:
+    """Return commands accepted by organizer transaction endpoints."""
+    if deleted_at is not None or status == PaymentStatus.REFUNDED:
+        return []
+    if status == PaymentStatus.SUCCESS:
+        return ["paid", "success"]
+    if status in {
+        PaymentStatus.CREATED, PaymentStatus.PENDING, PaymentStatus.FAILED,
+        PaymentStatus.EXPIRED, PaymentStatus.CANCELED,
+    }:
+        return ["paid", "success", "canceled", "delete"]
+    return []
 
 
 class Order(Base):
@@ -67,6 +81,13 @@ class Payment(Base):
     provider_reference_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payment_instructions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    deletion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def allowed_actions(self) -> list[str]:
+        return payment_allowed_actions(self.transaction_status, self.deleted_at)
 
 
 class PaymentProof(Base):
