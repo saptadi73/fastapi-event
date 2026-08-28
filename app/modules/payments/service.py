@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.modules.payments import schemas
 from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent, payment_allowed_actions
@@ -134,6 +134,20 @@ class PaymentService:
         return str(stored.get("token") or "")
 
     @staticmethod
+    def _reusable_doku_checkout_url(payment: Payment | None, now: datetime | None = None) -> str:
+        if not payment or not payment.checkout_url:
+            return ""
+        if payment.transaction_status not in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
+            return ""
+        if payment.expired_at is None:
+            return ""
+        current_time = now or datetime.now(timezone.utc)
+        expires_at = payment.expired_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return payment.checkout_url if expires_at > current_time else ""
+
+    @staticmethod
     async def _admin_user_ids(db: AsyncSession):
         rows = (await db.execute(select(User.id).where(User.role.in_(["admin", "organizer"]), User.status == "active"))).all()
         return [row[0] for row in rows]
@@ -241,6 +255,7 @@ class PaymentService:
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = payload.paid_at or payment.paid_at or now
             order.status = OrderStatus.PAID
+            order.canceled_at = order.canceled_by = order.cancellation_reason = None
             if order.registration_id:
                 registration = await session.get(Registration, order.registration_id, with_for_update=True)
                 if registration and registration.status != RegistrationStatus.CONFIRMED:
@@ -263,6 +278,12 @@ class PaymentService:
                 ).limit(1)
             )).scalar_one_or_none())
             order.status = OrderStatus.PAID if another_success else OrderStatus.CANCELED
+            if another_success:
+                order.canceled_at = order.canceled_by = order.cancellation_reason = None
+            else:
+                order.canceled_at = now
+                order.canceled_by = actor_user_id
+                order.cancellation_reason = payload.notes
             if order.registration_id and not another_success:
                 registration = await session.get(Registration, order.registration_id, with_for_update=True)
                 if registration and registration.status == RegistrationStatus.PAID:
@@ -678,7 +699,7 @@ class PaymentService:
                 if registration and registration.status != RegistrationStatus.CONFIRMED:
                     registration.status = RegistrationStatus.PAID
             elif status in {"FAILED", "CANCELLED", "CANCELED"}:
-                order.status, payment.transaction_status = OrderStatus.CANCELED, PaymentStatus.FAILED
+                order.status, payment.transaction_status = OrderStatus.PENDING, PaymentStatus.FAILED
             await PaymentService._notify_payment_status(session, order, payment)
             payment.channel_code = channel_value or channel_key
             payment.raw_response = json.dumps(payload)
@@ -749,10 +770,25 @@ class PaymentService:
 
         if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.DRAFT]:
             payment = payment or await PaymentRepository.get_payment_by_order(session, latest_order.id, "doku")
+            reusable_url = PaymentService._reusable_doku_checkout_url(payment)
+            if reusable_url:
+                return (schemas.DokuCheckoutResponse(payment_url=reusable_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True), latest_order)
+            if payment and (
+                payment.checkout_url
+                or payment.transaction_status not in {PaymentStatus.CREATED, PaymentStatus.PENDING}
+            ):
+                if payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
+                    payment.transaction_status = PaymentStatus.EXPIRED
+                    payment.expired_at = payment.expired_at or datetime.now(timezone.utc)
+                payment = None
             if not payment:
-                payment = await PaymentRepository.create_doku_payment(session, latest_order)
-            if payment.provider == "doku" and payment.checkout_url:
-                return (schemas.DokuCheckoutResponse(payment_url=payment.checkout_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True), latest_order)
+                payment = Payment(
+                    order_id=latest_order.id, provider="doku",
+                    gross_amount=latest_order.total_amount, currency=latest_order.currency,
+                    transaction_status=PaymentStatus.CREATED,
+                )
+                session.add(payment)
+                await session.flush()
         else:
             latest_order = await PaymentRepository.create_order(session, registration.id)
             payment = await PaymentRepository.create_doku_payment(session, latest_order)
@@ -760,6 +796,8 @@ class PaymentService:
         participant = await session.get(ParticipantProfile, registration.participant_id) if registration else None
         user = await session.get(User, participant.user_id) if participant else await session.get(User, user_id)
         event = await session.get(Event, registration.event_id) if registration else None
+        if event is None and latest_order.event_id:
+            event = await session.get(Event, latest_order.event_id)
         if event is None:
             from app.modules.store.models import Product, OrderItem
             event_id = (await session.execute(select(Product.event_id).join(OrderItem, OrderItem.product_id == Product.id).where(OrderItem.order_id == latest_order.id).limit(1))).scalar_one_or_none()
@@ -796,7 +834,7 @@ class PaymentService:
         payment.checkout_url = payment_url
         payment.raw_response = json.dumps(response)
         payment.transaction_status = PaymentStatus.PENDING
-        payment.expired_at = latest_order.expires_at
+        payment.expired_at = datetime.now(timezone.utc) + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)
         await session.commit(); await session.refresh(payment)
         return (
             schemas.DokuCheckoutResponse(
@@ -993,6 +1031,115 @@ class PaymentService:
         return order
 
     @staticmethod
+    async def _user_order_detail(session: AsyncSession, order: Order) -> schemas.UserOrderDetail:
+        from app.modules.store.models import OrderItem
+
+        items = list((await session.execute(
+            select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)
+        )).scalars().all())
+        payments = await PaymentRepository.get_payments_by_order(session, order.id)
+        return schemas.UserOrderDetail(
+            order=schemas.OrderRead.model_validate(order),
+            items=[schemas.OrderItemRead(
+                id=item.id, product_id=item.product_id,
+                product_code=item.product_code, product_name=item.product_name,
+                product_type=item.product_type, quantity=item.quantity,
+                unit_price=float(item.unit_price), currency=item.currency,
+                line_total=float(item.line_total), metadata=dict(item.metadata_json or {}),
+            ) for item in items],
+            latest_payment=schemas.PaymentRead.model_validate(payments[0]) if payments else None,
+            payment_attempts=[schemas.PaymentRead.model_validate(payment) for payment in payments],
+        )
+
+    @staticmethod
+    async def list_user_orders(
+        session: AsyncSession, user_id: uuid.UUID, *, status: str | None,
+        event_id: uuid.UUID | None, page: int, size: int,
+    ) -> tuple[list[schemas.UserOrderDetail], int]:
+        valid_statuses = {
+            OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PAID,
+            OrderStatus.EXPIRED, OrderStatus.CANCELED,
+        }
+        if status and status not in valid_statuses:
+            raise ValidationException("INVALID_ORDER_STATUS", "Status order tidak valid")
+        filters = [Order.user_id == user_id]
+        if status:
+            filters.append(Order.status == status)
+        if event_id:
+            filters.append(Order.event_id == event_id)
+        total = int((await session.execute(select(func.count(Order.id)).where(*filters))).scalar_one())
+        orders = await PaymentRepository.list_orders_for_user(
+            session, user_id, status=status, event_id=event_id,
+            offset=(page - 1) * size, limit=size,
+        )
+        return [await PaymentService._user_order_detail(session, order) for order in orders], total
+
+    @staticmethod
+    async def get_user_order_detail(
+        session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID,
+    ) -> schemas.UserOrderDetail:
+        order = await PaymentRepository.get_order_for_user(session, order_id, user_id)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        return await PaymentService._user_order_detail(session, order)
+
+    @staticmethod
+    async def cancel_user_order(
+        session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID,
+        reason: str | None = None,
+    ) -> schemas.UserOrderDetail:
+        order = await PaymentRepository.get_order_for_user(session, order_id, user_id, lock=True)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        payments = await PaymentRepository.get_payments_by_order(session, order.id, lock=True)
+        if order.status == OrderStatus.PAID or any(
+            payment.transaction_status == PaymentStatus.SUCCESS for payment in payments
+        ):
+            raise ConflictException("PAID_ORDER_CANCEL_FORBIDDEN", "Order yang sudah dibayar tidak dapat dibatalkan")
+        if order.status == OrderStatus.CANCELED and order.canceled_by is not None:
+            return await PaymentService._user_order_detail(session, order)
+
+        now = datetime.now(timezone.utc)
+        order.status, order.canceled_at, order.canceled_by = OrderStatus.CANCELED, now, user_id
+        order.cancellation_reason = reason.strip() if reason else None
+        for payment in payments:
+            if payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
+                payment.transaction_status = PaymentStatus.CANCELED
+                session.add(PaymentWebhookEvent(
+                    payment_id=payment.id, provider=payment.provider,
+                    request_id=f"user-cancel-{uuid.uuid4().hex}", event_status="CANCELED",
+                    payload={"canceled_by": str(user_id), "reason": order.cancellation_reason, "canceled_at": now.isoformat()},
+                ))
+        await session.commit()
+        await session.refresh(order)
+        return await PaymentService._user_order_detail(session, order)
+
+    @staticmethod
+    async def continue_user_order_payment(
+        session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID, provider: str,
+    ) -> tuple[schemas.DokuCheckoutResponse, Order]:
+        order = await PaymentRepository.get_order_for_user(session, order_id, user_id, lock=True)
+        if not order:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        if "continue_payment" not in order.allowed_actions:
+            raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dilanjutkan ke pembayaran")
+        payments = await PaymentRepository.get_payments_by_order(session, order.id, lock=True)
+        if any(payment.transaction_status == PaymentStatus.SUCCESS for payment in payments):
+            order.status = OrderStatus.PAID
+            await session.commit()
+            raise ConflictException("ORDER_ALREADY_PAID", "Order sudah dibayar")
+
+        order.status = OrderStatus.PENDING
+        order.canceled_at = order.canceled_by = order.cancellation_reason = None
+        await session.flush()
+        checkout_payload = schemas.CreateDokuCheckoutRequest(order_id=order.id)
+        if provider == "doku":
+            return await PaymentService.create_doku_checkout(session, checkout_payload, user_id)
+        if provider == "midtrans":
+            return await PaymentService.create_midtrans_checkout(session, checkout_payload, user_id)
+        raise ValidationException("INVALID_PAYMENT_PROVIDER", "Provider pembayaran tidak didukung")
+
+    @staticmethod
     async def get_invoice(session: AsyncSession, registration_ref: str | uuid.UUID, user_id: uuid.UUID) -> schemas.InvoiceRead:
         reg = await PaymentRepository.get_registration(session, registration_ref)
         participant = await session.get(ParticipantProfile, reg.participant_id)
@@ -1132,10 +1279,10 @@ class PaymentService:
             if registration and registration.status != RegistrationStatus.CONFIRMED:
                 registration.status = RegistrationStatus.PAID
         elif status in {"FAILED", "CANCELLED", "CANCELED"}:
-            order.status = OrderStatus.CANCELED
+            order.status = OrderStatus.PENDING
             payment.transaction_status = PaymentStatus.FAILED
         elif status == "EXPIRED":
-            order.status = OrderStatus.EXPIRED
+            order.status = OrderStatus.PENDING
             payment.transaction_status = PaymentStatus.EXPIRED
             payment.expired_at = datetime.now(timezone.utc)
         else:

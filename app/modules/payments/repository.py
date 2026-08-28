@@ -89,6 +89,7 @@ class PaymentRepository:
         order = Order(
             user_id=registration_owner,
             registration_id=registration_id,
+            event_id=package_row.event_id,
             order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
             subtotal=subtotal,
             discount_amount=0,
@@ -162,9 +163,42 @@ class PaymentRepository:
         return (await session.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
-    async def get_order_for_user(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID) -> Order | None:
+    async def get_order_for_user(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID, lock: bool = False) -> Order | None:
         stmt = (select(Order).outerjoin(Registration, Order.registration_id == Registration.id).outerjoin(ParticipantProfile, Registration.participant_id == ParticipantProfile.id).where(Order.id == order_id, (Order.user_id == user_id) | (ParticipantProfile.user_id == user_id)))
+        if lock:
+            # PostgreSQL cannot lock the nullable side of LEFT JOIN. Lock only
+            # the order row while retaining legacy participant ownership lookup.
+            stmt = stmt.with_for_update(of=Order)
         return (await session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def list_orders_for_user(
+        session: AsyncSession,
+        user_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        event_id: uuid.UUID | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> list[Order]:
+        stmt = select(Order).where(Order.user_id == user_id)
+        if status:
+            stmt = stmt.where(Order.status == status)
+        if event_id:
+            stmt = stmt.where(Order.event_id == event_id)
+        stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc()).offset(offset).limit(limit)
+        return list((await session.execute(stmt)).scalars().all())
+
+    @staticmethod
+    async def get_payments_by_order(session: AsyncSession, order_id: uuid.UUID, lock: bool = False) -> list[Payment]:
+        stmt = (
+            select(Payment)
+            .where(Payment.order_id == order_id, Payment.deleted_at.is_(None))
+            .order_by(Payment.created_at.desc(), Payment.id.desc())
+        )
+        if lock:
+            stmt = stmt.with_for_update()
+        return list((await session.execute(stmt)).scalars().all())
 
     @staticmethod
     async def get_registrations_for_user(session: AsyncSession, user_id: uuid.UUID, event_id: uuid.UUID | None = None) -> list[Registration]:

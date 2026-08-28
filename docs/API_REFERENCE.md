@@ -951,6 +951,10 @@ Polling/detail — **Auth** dan ownership checked:
 ```http
 GET /api/v1/payments/{payment_id}
 GET /api/v1/orders/{order_id}
+GET /api/v1/orders
+GET /api/v1/orders/{order_id}/detail
+POST /api/v1/orders/{order_id}/continue-payment
+DELETE /api/v1/orders/{order_id}
 GET /api/v1/payments/registrations/{registration_ref}/invoice
 GET /api/v1/payments/me/invoices?event_id={optional_uuid}
 ```
@@ -962,11 +966,75 @@ frontend mengarahkan user ke form profil terlebih dahulu. Setelah create
 registration berhasil dan backend menautkan order, frontend dapat memuat ulang
 endpoint invoice.
 
+### Pending order dan continue payment
+
+Checkout memindahkan item cart menjadi snapshot `order_items`. User tidak perlu
+memilih package ulang ketika payment gagal, kedaluwarsa, browser ditutup, atau
+session frontend hilang. Gunakan:
+
+```http
+GET /api/v1/orders?status=pending&event_id=<optional_uuid>&page=1&size=20
+```
+
+Response memiliki pagination `page`, `size`, `total`, `pages`. Setiap item:
+
+```json
+{
+  "order": {
+    "id": "order-uuid",
+    "event_id": "event-uuid",
+    "order_number": "ORD-...",
+    "status": "pending",
+    "total_amount": 8000000,
+    "currency": "IDR",
+    "allowed_actions": ["continue_payment", "cancel"]
+  },
+  "items": [{
+    "id": "order-item-uuid",
+    "product_id": "product-uuid",
+    "product_code": "DELEGATE_FULL",
+    "product_name": "Full Package",
+    "product_type": "delegate",
+    "quantity": 1,
+    "unit_price": 8000000,
+    "currency": "IDR",
+    "line_total": 8000000,
+    "metadata": {}
+  }],
+  "latest_payment": {
+    "id": "payment-uuid",
+    "provider": "midtrans",
+    "transaction_status": "expired"
+  },
+  "payment_attempts": []
+}
+```
+
+`GET /api/v1/orders/{order_id}/detail` mengembalikan struktur item yang sama.
+Untuk melanjutkan:
+
+```json
+POST /api/v1/orders/{order_id}/continue-payment
+{"provider":"doku"}
+```
+
+Nilai provider adalah `doku` atau `midtrans`. Attempt aktif yang belum expired
+dapat menggunakan URL/token lama; attempt gagal/expired tetap tersimpan dan
+attempt baru dibuat pada order yang sama. Webhook gagal/expired tidak lagi
+membatalkan order, sehingga order tetap `pending` dan payable.
+
+`DELETE /api/v1/orders/{order_id}` melakukan soft-cancel terhadap order belum
+lunas serta attempt `created/pending`. Payload body opsional:
+`{"reason":"..."}`. Order `paid` atau yang mempunyai attempt `success` ditolak
+dengan `409 PAID_ORDER_CANCEL_FORBIDDEN`. Soft-canceled order memiliki
+`allowed_actions=[]`; legacy order yang dahulu dibatalkan gateway tanpa
+`canceled_by` tetap dapat dipulihkan melalui continue payment.
+
 Payment fields: IDs/provider references, `payment_type`, `gross_amount`,
 `currency`, `transaction_status`, `paid_at`, `channel_code`,
 `virtual_account_no`, `payment_instructions_url`. Order status: `draft`,
 `pending`, `paid`, `expired`, `canceled`. Payment status: `created`, `pending`,
-`success`, `failed`, `expired`, `refunded`.
+`success`, `failed`, `expired`, `refunded`, `canceled`.
 
 Server-to-server; **jangan dipanggil frontend**:
 

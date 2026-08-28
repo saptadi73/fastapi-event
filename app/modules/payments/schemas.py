@@ -16,6 +16,14 @@ class CreateDokuCheckoutRequest(BaseModel):
         return self
 
 
+class ContinueOrderPaymentRequest(BaseModel):
+    provider: Literal["doku", "midtrans"]
+
+
+class CancelOrderRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class ManualPaymentConfirmRequest(BaseModel):
     payment_method: Literal["manual_transfer", "manual_qr_code"] = "manual_transfer"
     transfer_reference: str = Field(min_length=3, max_length=128)
@@ -168,6 +176,7 @@ class OrderRead(BaseModel):
 
     id: UUID
     registration_id: UUID | None
+    event_id: UUID | None = None
     order_number: str
     subtotal: float
     discount_amount: float
@@ -177,6 +186,10 @@ class OrderRead(BaseModel):
     currency: str
     status: str
     expires_at: datetime | None = None
+    canceled_at: datetime | None = None
+    canceled_by: UUID | None = None
+    cancellation_reason: str | None = None
+    allowed_actions: list[str] = Field(default_factory=list)
 
 
 class PaymentRead(BaseModel):
@@ -202,6 +215,26 @@ class PaymentRead(BaseModel):
     deleted_by: UUID | None = None
     deletion_reason: str | None = None
     allowed_actions: list[str] = Field(default_factory=list)
+
+
+class OrderItemRead(BaseModel):
+    id: UUID
+    product_id: UUID | None = None
+    product_code: str
+    product_name: str
+    product_type: str
+    quantity: int
+    unit_price: float
+    currency: str
+    line_total: float
+    metadata: dict = Field(default_factory=dict)
+
+
+class UserOrderDetail(BaseModel):
+    order: OrderRead
+    items: list[OrderItemRead]
+    latest_payment: PaymentRead | None = None
+    payment_attempts: list[PaymentRead] = Field(default_factory=list)
 
 
 class InvoiceRegistration(BaseModel):

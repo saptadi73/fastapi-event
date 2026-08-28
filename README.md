@@ -34,6 +34,12 @@ Delete pembayaran bersifat soft-delete dan mempertahankan audit. Operasi massal
 tersedia melalui `POST /api/v1/admin/transactions/bulk-actions`.
 Setiap transaksi mengirim `allowed_actions`, sehingga frontend tidak perlu
 menduplikasi aturan transisi status.
+
+Checkout package bersifat resumable. Item cart menjadi snapshot pending order
+yang dapat ditemukan melalui `GET /api/v1/orders`, dilanjutkan melalui
+`POST /api/v1/orders/{order_id}/continue-payment`, atau dibatalkan secara
+soft-cancel melalui `DELETE /api/v1/orders/{order_id}` tanpa menghapus riwayat
+payment attempt.
 Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
 
 Dokumen acuan:

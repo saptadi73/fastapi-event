@@ -101,7 +101,7 @@ class StoreService:
         if len(currencies) != 1:
             raise ValidationException("MIXED_CURRENCY", "Product dalam satu order harus memiliki currency yang sama")
         subtotal = sum((Decimal(str(product.price)) * item.quantity for item, product in rows), Decimal("0"))
-        order = Order(user_id=user_id, registration_id=None, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
+        order = Order(user_id=user_id, registration_id=None, event_id=event_id, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
         db.add(order)
         await db.flush()
         for item, product in rows:

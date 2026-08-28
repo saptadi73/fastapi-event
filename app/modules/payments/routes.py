@@ -327,6 +327,68 @@ async def get_order(
     )
 
 
+@router.get("/orders", summary="List own orders with items and payment attempts")
+async def list_my_orders(
+    request: Request,
+    status: str | None = Query(default=None),
+    event_id: uuid.UUID | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    orders, total = await PaymentService.list_user_orders(
+        db, current_user.id, status=status, event_id=event_id, page=page, size=size,
+    )
+    pages = (total + size - 1) // size if total else 0
+    return success_response(
+        "Order akun berhasil diambil", data=orders,
+        meta={"page": page, "size": size, "total": total, "pages": pages}, request=request,
+    )
+
+
+@router.get("/orders/{order_id}/detail", summary="Get own order detail and payment attempts")
+async def get_my_order_detail(
+    order_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    detail = await PaymentService.get_user_order_detail(db, order_id, current_user.id)
+    return success_response("Detail order ditemukan", data=detail, request=request)
+
+
+@router.post("/orders/{order_id}/continue-payment", summary="Continue payment for an existing unpaid order")
+async def continue_order_payment(
+    order_id: uuid.UUID,
+    payload: schemas.ContinueOrderPaymentRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    checkout, order = await PaymentService.continue_user_order_payment(
+        db, order_id, current_user.id, payload.provider,
+    )
+    return success_response(
+        "Pembayaran order siap dilanjutkan", data=checkout.model_dump(),
+        meta={"order_id": str(order.id), "order_number": order.order_number}, request=request,
+    )
+
+
+@router.delete("/orders/{order_id}", summary="Soft-cancel own unpaid order")
+async def cancel_my_order(
+    order_id: uuid.UUID,
+    request: Request,
+    payload: schemas.CancelOrderRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    detail = await PaymentService.cancel_user_order(
+        db, order_id, current_user.id, payload.reason if payload else None,
+    )
+    return success_response("Order berhasil dibatalkan", data=detail, request=request)
+
+
 @router.get("/payments/registrations/{registration_ref}/invoice", summary="Get invoice by registration")
 async def get_invoice(
     request: Request,

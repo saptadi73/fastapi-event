@@ -39,6 +39,17 @@ def payment_allowed_actions(status: str, deleted_at: datetime | None = None) -> 
     return []
 
 
+def order_allowed_actions(
+    status: str,
+    canceled_by: uuid.UUID | None = None,
+) -> list[str]:
+    if status == OrderStatus.PAID or (status == OrderStatus.CANCELED and canceled_by is not None):
+        return []
+    if status in {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.EXPIRED, OrderStatus.CANCELED}:
+        return ["continue_payment", "cancel"]
+    return []
+
+
 class Order(Base):
     __tablename__ = "orders"
 
@@ -46,6 +57,7 @@ class Order(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     registration_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("registrations.id"), nullable=True)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
     order_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     discount_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
@@ -55,6 +67,13 @@ class Order(Base):
     currency: Mapped[str] = mapped_column(String(3), default="IDR")
     status: Mapped[str] = mapped_column(String(20), default=OrderStatus.DRAFT)
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    canceled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def allowed_actions(self) -> list[str]:
+        return order_allowed_actions(self.status, self.canceled_by)
 
 
 class Payment(Base):
