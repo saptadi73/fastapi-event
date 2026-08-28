@@ -25,7 +25,7 @@ async def list_speakers(
 @router.get("/{speaker_id}", summary="Get speaker")
 async def get_speaker(
     request: Request,
-    speaker_id,
+    speaker_id: UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
     speaker = await SpeakerService.get(db, speaker_id)
@@ -46,7 +46,7 @@ async def create_speaker(
 @router.put("/{speaker_id}", summary="Update speaker")
 async def update_speaker(
     request: Request,
-    speaker_id,
+    speaker_id: UUID,
     payload: schemas.SpeakerUpdate,
     db: AsyncSession = Depends(get_db_session),
     admin=Depends(require_admin),
@@ -58,19 +58,27 @@ async def update_speaker(
 @router.post("/{speaker_id}/photo", summary="Upload speaker photo")
 async def upload_speaker_photo(
     request: Request,
-    speaker_id,
+    speaker_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db_session),
     admin=Depends(require_admin),
 ):
-    from app.core.uploads import save_profile_photo
+    from app.core.uploads import delete_uploaded_file, save_profile_photo
 
+    # Validate the UUID-backed record before writing a file to disk.
+    current = await SpeakerService.get(db, speaker_id)
     photo_url = await save_profile_photo(file, "speakers")
-    speaker = await SpeakerService.update(
-        db,
-        speaker_id,
-        schemas.SpeakerUpdate(profile_photo_url=photo_url),
-    )
+    try:
+        speaker = await SpeakerService.update(
+            db,
+            speaker_id,
+            schemas.SpeakerUpdate(profile_photo_url=photo_url),
+        )
+    except Exception:
+        delete_uploaded_file(photo_url)
+        raise
+    if current.profile_photo_url and current.profile_photo_url != photo_url:
+        delete_uploaded_file(current.profile_photo_url)
     return success_response("Foto speaker berhasil diunggah", data=speaker, request=request)
 
 
