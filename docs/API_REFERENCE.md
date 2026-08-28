@@ -2145,7 +2145,11 @@ file=<speaker.webp>
 
 Error yang mungkin dikembalikan: `400 INVALID_IMAGE_TYPE`, `400 EMPTY_IMAGE`,
 `400 IMAGE_TOO_LARGE`, `404 SPEAKER_NOT_FOUND`, `403` untuk role yang tidak
-diizinkan, dan `422` untuk UUID atau multipart field yang tidak valid.
+diizinkan, `422` untuk UUID atau multipart field yang tidak valid, serta
+`500 UPLOAD_STORAGE_ERROR` ketika proses aplikasi tidak memiliki izin tulis ke
+`UPLOAD_DIR`. Pada deployment Linux, direktori tersebut harus dimiliki atau
+dapat ditulis oleh user service dan dipasang sebagai persistent volume bila
+aplikasi berjalan dalam container.
 
 Hubungkan speaker ke event dengan payload
 `{"event_id":"uuid"}` pada `POST /api/v1/speakers/{speaker_id}/events`.

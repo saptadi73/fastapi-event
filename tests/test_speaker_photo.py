@@ -1,12 +1,16 @@
 import tempfile
 import unittest
 import uuid
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.config import get_settings
 from app.core.uploads import delete_uploaded_file
+from app.core.uploads import save_profile_photo
+from app.core.exceptions import AppException
+from starlette.datastructures import Headers, UploadFile
 from app.main import app
 from app.modules.speakers.routes import upload_speaker_photo
 from app.modules.speakers.service import SpeakerService
@@ -34,6 +38,18 @@ class SpeakerPhotoContractTests(unittest.TestCase):
 
 
 class SpeakerPhotoFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_storage_permission_failure_returns_diagnostic_error_code(self):
+        file = UploadFile(
+            file=BytesIO(b"image"),
+            filename="speaker.png",
+            headers=Headers({"content-type": "image/png"}),
+        )
+        with patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")):
+            with self.assertRaises(AppException) as caught:
+                await save_profile_photo(file, "speakers")
+
+        self.assertEqual("UPLOAD_STORAGE_ERROR", caught.exception.code)
+
     async def test_upload_replaces_photo_and_cleans_old_file(self):
         speaker_id = uuid.uuid4()
         request = SimpleNamespace(state=SimpleNamespace(request_id="request-id"))

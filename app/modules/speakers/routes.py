@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,7 @@ from app.modules.speakers import schemas
 from app.modules.speakers.service import SpeakerService
 
 router = APIRouter(prefix="/speakers", tags=["speakers"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", summary="List speakers")
@@ -75,6 +78,11 @@ async def upload_speaker_photo(
             schemas.SpeakerUpdate(profile_photo_url=photo_url),
         )
     except Exception:
+        logger.exception(
+            "Speaker photo database update failed: speaker_id=%s request_id=%s",
+            speaker_id,
+            getattr(request.state, "request_id", ""),
+        )
         delete_uploaded_file(photo_url)
         raise
     if current.profile_photo_url and current.profile_photo_url != photo_url:

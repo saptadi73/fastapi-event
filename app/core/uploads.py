@@ -1,10 +1,14 @@
 from pathlib import Path
 from uuid import uuid4
+import logging
 
 from fastapi import UploadFile
 
 from app.core.config import get_settings
-from app.core.exceptions import ValidationException
+from app.core.exceptions import AppException, ValidationException
+
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_IMAGE_TYPES = {
@@ -36,10 +40,23 @@ async def save_profile_photo(file: UploadFile, category: str) -> str:
             message=f"Ukuran foto maksimal {max_size // (1024 * 1024)} MB",
         )
 
-    target_dir = Path(settings.UPLOAD_DIR).resolve() / category
-    target_dir.mkdir(parents=True, exist_ok=True)
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    target_dir = upload_root / category
     filename = f"{uuid4()}{extension}"
-    (target_dir / filename).write_bytes(content)
+    target = target_dir / filename
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    except OSError as exc:
+        logger.exception(
+            "Profile photo storage write failed: upload_root=%s category=%s",
+            upload_root,
+            category,
+        )
+        raise AppException(
+            code="UPLOAD_STORAGE_ERROR",
+            message="Penyimpanan foto tidak dapat ditulis oleh server",
+        ) from exc
     return f"{settings.UPLOAD_URL_PREFIX}/{category}/{filename}"
 
 
