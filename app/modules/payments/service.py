@@ -2,6 +2,7 @@ import json
 import asyncio
 import uuid
 import re
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,13 +19,16 @@ from app.modules.participants.models import ParticipantProfile
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
 from app.modules.users.models import User
 from app.core.config import get_settings
-from app.core.exceptions import ConflictException, NotFoundException, ValidationException
+from app.core.exceptions import AppException, ConflictException, NotFoundException, ValidationException
 from app.modules.payments.doku import DokuCheckoutClient, verify_signature
 from app.modules.payments.midtrans import MidtransClient, normalize_midtrans_channel, verify_notification_signature
 from app.modules.payments.doku_snap import DokuSnapClient, ensure_fresh_timestamp, issue_merchant_token, verify_asymmetric_signature, verify_merchant_token, verify_symmetric_signature
 from app.modules.registrations.models import Registration, RegistrationStatus
 from app.modules.email_notifications.service import deliver_payment_for_order
 from app.modules.business_matching.models import Notification
+
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentService:
@@ -79,16 +83,33 @@ class PaymentService:
         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(file.filename or "payment-proof").name)[:255]
         storage_key = f"payment-proofs/{order.id}/{uuid.uuid4()}{extension}"
         target = Path(".private_uploads").resolve() / storage_key
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        except OSError as exc:
+            logger.exception(
+                "Payment proof storage write failed: order_id=%s storage_root=%s",
+                order.id,
+                Path(".private_uploads").resolve(),
+            )
+            raise AppException(
+                code="UPLOAD_STORAGE_ERROR",
+                message="Penyimpanan bukti pembayaran tidak dapat ditulis oleh server",
+            ) from exc
         proof = PaymentProof(payment_id=payment.id, uploaded_by=user_id, original_filename=safe_name, storage_key=storage_key, mime_type=mime_type, file_size=len(content), notes=notes)
         session.add(proof)
         await PaymentService._notify_payment_status(session, order, payment, user_id)
         try:
             await session.commit()
         except Exception:
-            if target.is_file():
-                target.unlink()
+            try:
+                if target.is_file():
+                    target.unlink()
+            except OSError:
+                logger.exception(
+                    "Payment proof cleanup failed after database error: storage_key=%s",
+                    storage_key,
+                )
             raise
         await session.refresh(proof)
         return payment, proof

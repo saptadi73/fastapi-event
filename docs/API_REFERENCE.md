@@ -2012,6 +2012,14 @@ Participant dapat mengunggah bukti transfer manual atau QRIS statis sebagai
 `multipart/form-data`. File disimpan privat; format yang diterima JPG, PNG, atau
 PDF dengan ukuran maksimal 10 MB.
 
+File disimpan di `.private_uploads/payment-proofs/{order_id}` dan tidak dipasang
+sebagai static/public directory. User proses aplikasi harus memiliki akses
+read/write, sedangkan Nginx tidak memerlukan akses langsung. Kegagalan izin
+filesystem dikembalikan sebagai `500 UPLOAD_STORAGE_ERROR` dan dicatat bersama
+`order_id` serta storage root pada log aplikasi. Untuk deployment Linux,
+gunakan permission privat (`700` untuk direktori dan `600` untuk file) dengan
+owner user Gunicorn.
+
 ```http
 POST /api/v1/payments/orders/{order_id}/manual-proof
 Authorization: Bearer <participant_access_token>
