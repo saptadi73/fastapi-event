@@ -1,5 +1,26 @@
 # Production database migration
 
+## Bilingual revisions
+
+Rangkaian bilingual saat ini berakhir di revision `202608290037`:
+
+- `202608290035`: locale user serta template/log email.
+- `202608290036`: content translation dinamis.
+- `202608290037`: check constraint `en` dan `zh-CN`.
+
+SQL PostgreSQL untuk rentang `202608280034:202608290037` telah lolos validasi
+offline. Tetap lakukan backup dan uji pada salinan database staging sebelum
+menjalankan `alembic upgrade head` di production.
+
+Structured request log mencatat `request_id`, `locale`, method, path tanpa query,
+status code, dan durasi. Header, request body, token, serta data pribadi tidak
+dicatat oleh locale middleware.
+
+Downgrade bilingual mempertahankan field source canonical pada event, speaker,
+session, product, dan resource lain. Menurunkan melewati revision `202608290036`
+akan menghapus tabel content translation; menurunkan melewati `202608290035`
+akan menghapus template email non-English. Backup wajib dilakukan sebelum downgrade.
+
 Run this procedure from the deployed backend repository. It applies every
 committed Alembic revision, seeds the DOKU payment-channel catalog
 idempotently, and verifies the final revision and core IWBIF tables.

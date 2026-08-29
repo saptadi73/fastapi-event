@@ -4,6 +4,11 @@ Kontrak kerja frontend untuk backend IWBIF 2026. Referensi mesin tersedia di
 `GET /openapi.json` dan Swagger UI di `GET /docs`; dokumen ini menjelaskan
 payload, respons, workflow, dan mekanisme integrasi.
 
+Status kelengkapan implementasi bilingual dan acceptance checklist tersedia di
+`docs/BILINGUAL_BACKEND_TODO.md`.
+Panduan implementasi editor frontend untuk speaker dan agenda tersedia di
+`docs/FRONTEND_BILINGUAL_CONTENT_INTEGRATION.md`.
+
 ## 1. Konvensi umum
 
 ```text
@@ -17,6 +22,46 @@ WebSocket   : ws:// atau wss:// mengikuti protokol backend
 - Gunakan JSON kecuali upload `multipart/form-data`.
 - Nominal dan status backend adalah sumber kebenaran.
 
+### 1.1 Localization (`en` dan `zh-CN`)
+
+- Locale yang didukung adalah `en` dan `zh-CN` (Simplified Chinese).
+- Database menolak locale selain `en` dan `zh-CN` pada user, template/log email,
+  dan content translation.
+- Urutan pemilihan per request: query `?locale=zh-CN`, header
+  `Accept-Language`, lalu fallback `en`.
+- `POST /auth/register` menerima `preferred_locale`; default `en`.
+- `PUT /auth/me` dapat memperbarui `preferred_locale`.
+- Response user menyertakan `preferred_locale`.
+- Pesan presentasi yang dikenal dapat dilokalkan. Status, provider, trigger,
+  `error.code`, dan `allowed_actions` tetap canonical dan tidak diterjemahkan.
+- Error domain utama menggunakan `error.code` sebagai translation key. Frontend
+  harus mengambil keputusan berdasarkan code, bukan teks pesan.
+- Error code tanpa copy khusus tetap menerima pesan Mandarin generik tanpa
+  mengubah code. Pesan sukses tanpa copy khusus menggunakan `操作成功` pada
+  locale `zh-CN`.
+- Endpoint template email admin menerima query `locale` pada list, update,
+  preview, test-send, preferences, dan log.
+- Email otomatis mengikuti `user.preferred_locale`; locale yang tidak didukung
+  menggunakan `en`.
+- Response HTTP mengirim `Content-Language` dan `Vary: Accept-Language`.
+- OpenAPI menampilkan parameter global `locale`. Untuk language switch frontend,
+  gunakan query; `Accept-Language` tetap menjadi fallback.
+- Konten dinamis menggunakan fallback `locale diminta -> en -> field sumber`.
+  Resource yang dilokalkan menyertakan `content_locale` dan
+  `translation_fallback`.
+
+Contoh payload akun:
+
+```json
+{
+  "email": "delegate@example.cn",
+  "password": "strong-password",
+  "phone": "+8613800000000",
+  "country": "China",
+  "preferred_locale": "zh-CN"
+}
+```
+
 Success envelope:
 
 ```json
@@ -29,6 +74,59 @@ Success envelope:
   "timestamp": "2026-08-15T12:00:00Z"
 }
 ```
+
+### 1.2 Admin content translation
+
+Daftar entity dan field yang boleh diterjemahkan:
+
+```http
+GET /api/v1/admin/content-translations/entities
+```
+
+Membuat atau mengganti translation:
+
+```http
+PUT /api/v1/admin/content-translations/event/{event_id}/zh-CN
+Authorization: Bearer <admin-or-organizer-token>
+Content-Type: application/json
+
+{
+  "fields": {
+    "name": "IWBIF 商务与投资论坛",
+    "description": "国际商务与投资论坛",
+    "venue_name": "雅加达会议中心"
+  }
+}
+```
+
+Endpoint lain:
+
+```text
+GET    /api/v1/admin/content-translations/{entity_type}/{entity_id}
+DELETE /api/v1/admin/content-translations/{entity_type}/{entity_id}/{locale}
+```
+
+Entity yang didukung: `event`, `product`, `delegate_package`,
+`delegate_package_rate`, `delegate_package_facility`, `event_activity`,
+`business_matching_slot`, `session`, `speaker`, `announcement`, dan
+`certificate`, ditambah `matching_session`, `meeting_venue`, dan
+`meeting_resource`. Field di luar whitelist ditolak dengan
+`INVALID_TRANSLATION_FIELD`.
+
+Contoh data localized:
+
+```json
+{
+  "id": "resource-uuid",
+  "name": "IWBIF 商务与投资论坛",
+  "status": "published",
+  "content_locale": "zh-CN",
+  "translation_fallback": false
+}
+```
+
+Status tetap canonical. Jika Mandarin belum tersedia, backend menggunakan
+translation English atau field sumber dan mengirim `translation_fallback: true`.
 
 Error envelope:
 

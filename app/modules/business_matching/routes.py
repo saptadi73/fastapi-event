@@ -16,6 +16,8 @@ from .service import BusinessMatchingService as Service
 from .organizer_service import OrganizerMatchingService
 from .realtime import conversation_hub
 from app.modules.email_notifications.service import deliver_meeting_update, deliver_to_user
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 from app.modules.participants.models import ParticipantProfile
 from app.modules.events.models import Event
 
@@ -189,7 +191,9 @@ async def confirm(meeting_id: UUID, payload: schemas.MeetingConfirm, request: Re
 
 @router.get("/events/{event_id}/matching-sessions")
 async def sessions(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    await Service.context(db, user.id, event_id); rows = list((await db.execute(select(MatchingSession).where(MatchingSession.event_id == event_id))).scalars()); return success_response("Matching sessions berhasil diambil", rows, request=request)
+    await Service.context(db, user.id, event_id)
+    rows = list((await db.execute(select(MatchingSession).where(MatchingSession.event_id == event_id))).scalars())
+    return success_response("Matching sessions berhasil diambil", await localize_models(db, "matching_session", rows, request_locale(request)), request=request)
 
 @router.get("/events/{event_id}/meeting-slots")
 async def slots(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
@@ -197,7 +201,9 @@ async def slots(event_id: UUID, request: Request, user: User = Depends(get_curre
 
 @router.get("/events/{event_id}/meeting-resources")
 async def resources(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
-    await Service.context(db, user.id, event_id); return success_response("Meeting resources berhasil diambil", await Repo.resources(db, event_id), request=request)
+    await Service.context(db, user.id, event_id)
+    rows = await Repo.resources(db, event_id)
+    return success_response("Meeting resources berhasil diambil", await localize_models(db, "meeting_resource", rows, request_locale(request)), request=request)
 
 @router.get("/events/{event_id}/availability")
 async def availability(event_id: UUID, request: Request, participant_id: UUID | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):

@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import IntegrityError
 
 from app.core.constants import ErrorCode
@@ -9,6 +10,28 @@ from app.support.responses import fail_response
 
 
 def add_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(request: Request, exc: HTTPException):
+        code = {
+            400: "BAD_REQUEST",
+            401: "UNAUTHORIZED",
+            403: "FORBIDDEN",
+            404: "NOT_FOUND",
+            405: "METHOD_NOT_ALLOWED",
+            409: "CONFLICT",
+            422: "VALIDATION_ERROR",
+        }.get(exc.status_code, f"HTTP_{exc.status_code}")
+        message = str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers=exc.headers,
+            content=fail_response(
+                message=message,
+                errors=[{"field": "", "code": code, "message": message}],
+                request=request,
+            ),
+        )
+
     @app.exception_handler(AppException)
     async def handle_app_exception(request: Request, exc: AppException):
         status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -48,6 +71,21 @@ def add_exception_handlers(app: FastAPI) -> None:
             ),
         )
 
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation(request: Request, exc: RequestValidationError):
+        errors = []
+        for error in exc.errors():
+            field = ".".join(str(loc) for loc in error.get("loc", []))
+            errors.append({
+                "field": field,
+                "code": error.get("type", ErrorCode.VALIDATION_ERROR),
+                "message": error.get("msg", "Validation error"),
+            })
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=fail_response("Validation failed", errors, request=request),
+        )
+
     @app.exception_handler(IntegrityError)
     async def handle_integrity_error(request: Request, exc: IntegrityError):
         return JSONResponse(
@@ -58,4 +96,3 @@ def add_exception_handlers(app: FastAPI) -> None:
                 request=request,
             ),
         )
-

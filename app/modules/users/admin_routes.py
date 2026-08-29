@@ -34,7 +34,14 @@ async def list_users(request: Request, page: int = Query(1, ge=1), size: int = Q
 @router.post("", status_code=201)
 async def create_user(payload: schemas.AdminUserCreate, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
     ensure_role_authority(admin, payload.role)
-    row = await UserRepository.create(db, payload.email, hash_password(payload.password), payload.country, payload.phone)
+    row = await UserRepository.create(
+        db,
+        payload.email,
+        hash_password(payload.password),
+        payload.country,
+        payload.phone,
+        payload.preferred_locale,
+    )
     row.full_name = payload.full_name
     row.role = payload.role
     row.status = payload.status

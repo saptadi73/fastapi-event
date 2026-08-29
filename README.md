@@ -42,8 +42,18 @@ soft-cancel melalui `DELETE /api/v1/orders/{order_id}` tanpa menghapus riwayat
 payment attempt.
 Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
 
+Backend mendukung locale `en` dan `zh-CN` (Simplified Chinese) tanpa
+menggandakan endpoint. Frontend dapat memakai `?locale=zh-CN` atau header
+`Accept-Language: zh-CN`. Preferensi email disimpan pada `preferred_locale` user.
+Status, error code, provider, dan `allowed_actions` tetap canonical.
+Konten dinamis dikelola melalui `/api/v1/admin/content-translations`, dengan
+fallback locale yang eksplisit dan snapshot nama produk pada saat checkout.
+
 Dokumen acuan:
 
+- `docs/BILINGUAL_BACKEND_TODO.md` — checklist implementasi dan acceptance bilingual.
+- `docs/FRONTEND_BILINGUAL_CONTENT_INTEGRATION.md` — kontrak frontend editor speaker dan agenda bilingual.
+- `docs/I18N_MESSAGE_AUDIT.md` — inventarisasi dan kebijakan fallback pesan API.
 - `docs/IWAPI_SUMMIT_WEBSITE.md`
 - `docs/IWBIF_2026_Backend_Implementation_Reference.md`
 - `docs/Backend_Business_Matching_FastAPI_v2.md`

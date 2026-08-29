@@ -8,6 +8,8 @@ from app.core.dependencies import get_current_user, get_db_session, require_admi
 from app.support.responses import success_response
 from app.modules.speakers import schemas
 from app.modules.speakers.service import SpeakerService
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 
 router = APIRouter(prefix="/speakers", tags=["speakers"])
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ async def list_speakers(
     db: AsyncSession = Depends(get_db_session),
 ):
     rows = await SpeakerService.list(db, page=page, size=size)
-    data = [schemas.SpeakerRead.model_validate(row) for row in rows]
+    data = await localize_models(db, "speaker", rows, request_locale(request))
     return success_response("List speaker berhasil", data=data, request=request, meta={"page": page, "size": size, "total": len(data), "pages": 1})
 
 
@@ -32,7 +34,8 @@ async def get_speaker(
     db: AsyncSession = Depends(get_db_session),
 ):
     speaker = await SpeakerService.get(db, speaker_id)
-    return success_response("Speaker ditemukan", data=speaker, request=request)
+    data = (await localize_models(db, "speaker", [speaker], request_locale(request)))[0]
+    return success_response("Speaker ditemukan", data=data, request=request)
 
 
 @router.post("", summary="Create speaker")

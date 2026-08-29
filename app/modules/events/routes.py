@@ -10,6 +10,8 @@ from app.modules.speakers import schemas as speaker_schemas
 from app.modules.speakers.service import SpeakerService
 from app.modules.events import schemas
 from app.modules.events.service import EventService
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 
 router = APIRouter()
 
@@ -22,7 +24,7 @@ async def list_events(
     db: AsyncSession = Depends(get_db_session),
 ):
     items, meta = await EventService.list_events(db, page=page, size=size)
-    data = [schemas.EventRead.model_validate(item) for item in items]
+    data = await localize_models(db, "event", items, request_locale(request))
     return success_response("List event berhasil diambil", data=data, meta=meta, request=request)
 
 
@@ -33,7 +35,8 @@ async def get_event(
     db: AsyncSession = Depends(get_db_session),
 ):
     event = await EventService.get_by_id(db, event_id)
-    return success_response("Event ditemukan", data=event, request=request)
+    data = (await localize_models(db, "event", [event], request_locale(request)))[0]
+    return success_response("Event ditemukan", data=data, request=request)
 
 
 @router.get("/{slug}/sessions", summary="Get event sessions by slug")
@@ -44,7 +47,7 @@ async def get_event_sessions(
 ):
     event = await EventService.get_by_slug(db, slug)
     rows = await SessionService.list_by_event(db, event.id)
-    data = [session_schemas.SessionRead.model_validate(row) for row in rows]
+    data = await localize_models(db, "session", rows, request_locale(request))
     return success_response("Session event ditemukan", data=data, request=request)
 
 
@@ -56,7 +59,7 @@ async def get_event_speakers(
 ):
     event = await EventService.get_by_slug(db, slug)
     speakers = await SpeakerService.list_featured_by_event(db, event.id, size=100)
-    data = [speaker_schemas.SpeakerRead.model_validate(row) for row in speakers]
+    data = await localize_models(db, "speaker", speakers, request_locale(request))
     return success_response("Speaker event ditemukan", data=data, request=request)
 
 

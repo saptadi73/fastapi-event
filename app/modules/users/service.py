@@ -144,6 +144,7 @@ class UserService:
             password_hash=password_hash,
             country=payload.country,
             phone=payload.phone,
+            preferred_locale=payload.preferred_locale,
         )
         access_token = create_access_token(str(user.id))
         refresh_token = create_refresh_token(str(user.id))
@@ -183,6 +184,7 @@ class UserService:
             user=user,
             full_name=payload.full_name,
             phone=payload.phone,
+            preferred_locale=payload.preferred_locale,
         )
         return schemas.UserRead.model_validate(user)
 

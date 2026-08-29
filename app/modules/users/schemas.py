@@ -4,12 +4,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Literal
 
-
 class UserBase(BaseModel):
     email: str = Field(min_length=6, max_length=255)
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
     country: str | None = Field(default=None, max_length=100)
+    preferred_locale: Literal["en", "zh-CN"] = "en"
 
 
 class UserCreate(UserBase):
@@ -40,6 +40,7 @@ class UserLogin(BaseModel):
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
+    preferred_locale: Literal["en", "zh-CN"] | None = None
 
 
 class ChangePassword(BaseModel):

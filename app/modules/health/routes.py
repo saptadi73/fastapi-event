@@ -9,8 +9,8 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health", summary="Health check")
-async def health():
-    return success_response(message="OK", data={"status": "alive"})
+async def health(request: Request):
+    return success_response(message="OK", data={"status": "alive"}, request=request)
 
 
 @router.get("/health/database", summary="Database connectivity check")

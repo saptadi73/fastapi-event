@@ -7,19 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.store.models import Product
+from app.modules.content_translations.service import translation_map
 from . import schemas
 from .models import DelegatePackage, DelegatePackageFacility, DelegatePackageRate
 
 
 class DelegatePackageService:
     @staticmethod
-    async def catalog(db: AsyncSession, event_id, *, admin=False):
+    async def catalog(db: AsyncSession, event_id, *, admin=False, locale="en"):
         packages_q = select(DelegatePackage).where(DelegatePackage.event_id == event_id)
         if not admin:
             packages_q = packages_q.where(DelegatePackage.is_active.is_(True))
         packages = list((await db.execute(packages_q.order_by(DelegatePackage.display_order, DelegatePackage.code))).scalars())
         if not packages:
-            return schemas.PackageCatalogRead(main_packages=[], additional_packages=[])
+            return {"main_packages": [], "additional_packages": []}
         ids = [row.id for row in packages]
         rates_q = select(DelegatePackageRate).where(DelegatePackageRate.delegate_package_id.in_(ids))
         facilities_q = select(DelegatePackageFacility).where(DelegatePackageFacility.delegate_package_id.in_(ids))
@@ -32,17 +33,38 @@ class DelegatePackageService:
         product_rows = list((await db.execute(select(Product.delegate_package_rate_id, Product.id).where(Product.delegate_package_rate_id.in_(rate_ids)))).all()) if rate_ids else []
         product_map = {rate_id: product_id for rate_id, product_id in product_rows}
         facilities = list((await db.execute(facilities_q.order_by(DelegatePackageFacility.display_order, DelegatePackageFacility.name))).scalars())
+        package_translations = await translation_map(db, "delegate_package", ids, locale)
+        rate_translations = await translation_map(db, "delegate_package_rate", rate_ids, locale)
+        facility_translations = await translation_map(db, "delegate_package_facility", [row.id for row in facilities], locale)
         rate_map, facility_map = {}, {}
         for row in rates: rate_map.setdefault(row.delegate_package_id, []).append(row)
         for row in facilities: facility_map.setdefault(row.delegate_package_id, []).append(row)
         main, additional = [], []
         for package in packages:
-            item = schemas.PackageCatalogItem.model_validate(package).model_copy(update={
-                "rates": [schemas.PackageRateRead.model_validate(x).model_copy(update={"product_id": product_map.get(x.id)}) for x in rate_map.get(package.id, [])],
-                "facilities": [schemas.PackageFacilityRead.model_validate(x) for x in facility_map.get(package.id, [])],
-            })
+            item = schemas.PackageRead.model_validate(package).model_dump()
+            package_translation = package_translations.get(package.id)
+            if package_translation: item.update(package_translation.fields)
+            item["content_locale"] = package_translation.locale if package_translation else "source"
+            item["translation_fallback"] = package_translation is None and locale != "en"
+            item["rates"] = []
+            for rate in rate_map.get(package.id, []):
+                rate_data = schemas.PackageRateRead.model_validate(rate).model_dump()
+                rate_data["product_id"] = product_map.get(rate.id)
+                translation = rate_translations.get(rate.id)
+                if translation: rate_data.update(translation.fields)
+                rate_data["content_locale"] = translation.locale if translation else "source"
+                rate_data["translation_fallback"] = translation is None and locale != "en"
+                item["rates"].append(rate_data)
+            item["facilities"] = []
+            for facility in facility_map.get(package.id, []):
+                facility_data = schemas.PackageFacilityRead.model_validate(facility).model_dump()
+                translation = facility_translations.get(facility.id)
+                if translation: facility_data.update(translation.fields)
+                facility_data["content_locale"] = translation.locale if translation else "source"
+                facility_data["translation_fallback"] = translation is None and locale != "en"
+                item["facilities"].append(facility_data)
             (main if package.package_type == "main" else additional).append(item)
-        return schemas.PackageCatalogRead(main_packages=main, additional_packages=additional)
+        return {"main_packages": main, "additional_packages": additional}
 
     @staticmethod
     async def _package(db, package_id, event_id=None):

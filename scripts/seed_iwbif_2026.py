@@ -27,7 +27,7 @@ from app.modules.business_matching.models import (
 from app.modules.check_ins.models import CheckIn
 from app.modules.events.models import Event, EventStatus
 from app.modules.email_notifications.models import EmailNotificationTemplate
-from app.modules.email_notifications.service import DEFAULT_TEMPLATES, TRIGGER_VARIABLES
+from app.modules.email_notifications.service import DEFAULT_TEMPLATES_BY_LOCALE, TRIGGER_VARIABLES
 from app.modules.iwbif.models import (
     AccommodationTravel, BusinessMatchingProfileSlot, BusinessMatchingSlot,
     Company, DelegatePackage, DelegatePackageFacility, DelegatePackageRate, DelegateRegistrationDetail, EventActivity,
@@ -141,11 +141,11 @@ async def seed():
     async with AsyncSessionFactory() as db:
         event = await ensure(db, Event, slug=EVENT_SLUG, defaults=dict(name="International Women Business & Investment Forum 2026", description="Empowering Women Entrepreneurs Through Finance, Global Collaboration, and Digital Transformation", venue_name="Hotel Indonesia Kempinski Jakarta", venue_address="Jl. M.H. Thamrin No. 1, Jakarta", timezone="Asia/Jakarta", start_at=at(14), end_at=at(17, 23, 59), capacity=500, status=EventStatus.PUBLISHED))
 
-        # Seed canonical English email copy. This intentionally updates existing
-        # seeded templates so rerunning the idempotent seed also migrates the
-        # previous Indonesian demo copy, while templates remain editable later.
-        for trigger, (subject, body) in DEFAULT_TEMPLATES.items():
-            await ensure(db, EmailNotificationTemplate, event_id=event.id, trigger=trigger, defaults=dict(subject_template=subject, body_template=body, available_variables=TRIGGER_VARIABLES[trigger], is_enabled=True))
+        # Seed canonical English and Simplified Chinese email copy. Rerunning
+        # remains idempotent while templates stay editable by organizers.
+        for locale, templates in DEFAULT_TEMPLATES_BY_LOCALE.items():
+            for trigger, (subject, body) in templates.items():
+                await ensure(db, EmailNotificationTemplate, event_id=event.id, trigger=trigger, locale=locale, defaults=dict(subject_template=subject, body_template=body, available_variables=TRIGGER_VARIABLES[trigger], is_enabled=True))
 
         # Preserve existing foreign-key references while aligning the activity
         # master with the implementation reference document.

@@ -12,6 +12,13 @@ from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate
 
 class StoreService:
     @staticmethod
+    def localized_product_snapshot(product, translation):
+        metadata = dict(product.metadata_json or {})
+        metadata["content_locale"] = translation.locale if translation else "source"
+        name = translation.fields.get("name", product.name) if translation else product.name
+        return name, metadata
+
+    @staticmethod
     async def get_cart(db: AsyncSession, user_id, event_id):
         cart = (await db.execute(select(Cart).where(Cart.user_id == user_id, Cart.event_id == event_id))).scalar_one_or_none()
         if not cart:
@@ -67,7 +74,7 @@ class StoreService:
         return await StoreService.get_cart(db, user_id, event_id)
 
     @staticmethod
-    async def checkout(db: AsyncSession, user_id, event_id):
+    async def checkout(db: AsyncSession, user_id, event_id, locale="en"):
         cart = (await db.execute(
             select(Cart)
             .where(Cart.user_id == user_id, Cart.event_id == event_id)
@@ -104,8 +111,12 @@ class StoreService:
         order = Order(user_id=user_id, registration_id=None, event_id=event_id, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
         db.add(order)
         await db.flush()
+        from app.modules.content_translations.service import translation_map
+        product_translations = await translation_map(db, "product", [product.id for _, product in rows], locale)
         for item, product in rows:
-            db.add(OrderItem(order_id=order.id, product_id=product.id, product_code=product.code, product_name=product.name, product_type=product.product_type, quantity=item.quantity, unit_price=product.price, currency=product.currency, line_total=Decimal(str(product.price)) * item.quantity, metadata_json=dict(product.metadata_json or {})))
+            translation = product_translations.get(product.id)
+            product_name, metadata = StoreService.localized_product_snapshot(product, translation)
+            db.add(OrderItem(order_id=order.id, product_id=product.id, product_code=product.code, product_name=product_name, product_type=product.product_type, quantity=item.quantity, unit_price=product.price, currency=product.currency, line_total=Decimal(str(product.price)) * item.quantity, metadata_json=metadata))
         await db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
         await db.commit()
         await db.refresh(order)

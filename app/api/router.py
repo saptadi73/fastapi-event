@@ -18,6 +18,7 @@ from app.modules.store import routes as store_routes
 from app.modules.admin_content import routes as admin_content_routes
 from app.modules.users import admin_routes as user_admin_routes
 from app.modules.email_notifications import routes as email_notification_routes
+from app.modules.content_translations import routes as content_translation_routes
 
 router = APIRouter()
 
@@ -39,3 +40,4 @@ router.include_router(store_routes.router)
 router.include_router(admin_content_routes.router)
 router.include_router(user_admin_routes.router)
 router.include_router(email_notification_routes.router)
+router.include_router(content_translation_routes.router)

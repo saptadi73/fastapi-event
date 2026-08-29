@@ -14,6 +14,8 @@ from app.modules.users.models import User
 from app.modules.events.models import Event
 from app.modules.email_notifications.service import deliver_to_user
 from app.support.responses import success_response
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 from . import schemas
 from .constants import *
 from .models import (BusinessMatchingProfileSlot, BusinessMatchingSlot, Company,
@@ -37,15 +39,16 @@ async def options(request: Request):
 @router.get("/events/{event_id}/delegate-packages")
 async def packages(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
     rows = list((await db.execute(select(DelegatePackage).where(DelegatePackage.event_id == event_id, DelegatePackage.is_active.is_(True)).order_by(DelegatePackage.display_order, DelegatePackage.code))).scalars())
-    return success_response("Paket delegate ditemukan", [schemas.PackageRead.model_validate(x) for x in rows], request=request)
+    data = await localize_models(db, "delegate_package", rows, request_locale(request))
+    return success_response("Paket delegate ditemukan", data, request=request)
 
 @router.get("/events/{event_id}/delegate-package-catalog")
 async def package_catalog(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
-    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id), request=request)
+    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id, locale=request_locale(request)), request=request)
 
 @router.get("/admin/events/{event_id}/delegate-package-catalog")
 async def admin_package_catalog(event_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
-    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id, admin=True), request=request)
+    return success_response("Katalog package delegate ditemukan", await DelegatePackageService.catalog(db, event_id, admin=True, locale=request_locale(request)), request=request)
 
 @router.post("/admin/events/{event_id}/delegate-packages/{package_id}/rates", status_code=201)
 async def create_package_rate(event_id: UUID, package_id: UUID, payload: schemas.PackageRateWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
@@ -73,11 +76,13 @@ async def disable_package_facility(facility_id: UUID, request: Request, admin: U
 
 @router.get("/events/{event_id}/activities")
 async def activities(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
-    rows = list((await db.execute(select(EventActivity).where(EventActivity.event_id == event_id, EventActivity.is_active.is_(True)).order_by(EventActivity.name))).scalars()); return success_response("Aktivitas ditemukan", [schemas.ActivityRead.model_validate(x) for x in rows], request=request)
+    rows = list((await db.execute(select(EventActivity).where(EventActivity.event_id == event_id, EventActivity.is_active.is_(True)).order_by(EventActivity.name))).scalars())
+    return success_response("Aktivitas ditemukan", await localize_models(db, "event_activity", rows, request_locale(request)), request=request)
 
 @router.get("/events/{event_id}/business-matching-slots")
 async def matching_slots(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
-    rows = list((await db.execute(select(BusinessMatchingSlot).where(BusinessMatchingSlot.event_id == event_id, BusinessMatchingSlot.is_active.is_(True)).order_by(BusinessMatchingSlot.slot_date, BusinessMatchingSlot.start_time))).scalars()); return success_response("Slot business matching ditemukan", [schemas.SlotRead.model_validate(x) for x in rows], request=request)
+    rows = list((await db.execute(select(BusinessMatchingSlot).where(BusinessMatchingSlot.event_id == event_id, BusinessMatchingSlot.is_active.is_(True)).order_by(BusinessMatchingSlot.slot_date, BusinessMatchingSlot.start_time))).scalars())
+    return success_response("Slot business matching ditemukan", await localize_models(db, "business_matching_slot", rows, request_locale(request)), request=request)
 
 def master_crud(model, write_schema, read_schema, label):
     async def create(event_id: UUID, payload, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
@@ -129,7 +134,7 @@ async def create_registration(event_id: UUID, payload: schemas.DelegateRegistrat
     detail = await db.get(DelegateRegistrationDetail, reg.id)
     package = await db.get(DelegatePackage, detail.delegate_package_id); event = await db.get(Event, event_id)
     main_selection = (await db.execute(select(DelegateRegistrationPackageSelection).where(DelegateRegistrationPackageSelection.registration_id == reg.id, DelegateRegistrationPackageSelection.selection_role == "main"))).scalar_one_or_none()
-    background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": f"{main_selection.package_name} - {main_selection.rate_name}" if main_selection else package.name, "package_code": main_selection.package_code if main_selection else package.code, "amount": main_selection.selected_amount if main_selection else package.amount, "currency": main_selection.selected_currency if main_selection else package.currency}, "registration", reg.id)
+    background_tasks.add_task(deliver_to_user, event_id, "delegate_package_selected", user.id, {"event_name": event.name, "package_name": f"{main_selection.package_name} - {main_selection.rate_name}" if main_selection else package.name, "package_code": main_selection.package_code if main_selection else package.code, "amount": main_selection.selected_amount if main_selection else package.amount, "currency": main_selection.selected_currency if main_selection else package.currency, "_delegate_package_id": main_selection.delegate_package_id if main_selection else package.id, "_delegate_package_rate_id": main_selection.package_rate_id if main_selection else None}, "registration", reg.id)
     return success_response("Draft registrasi IWBIF berhasil dibuat", await IwbifService.read_registration(db, reg.id, user.id), request=request)
 
 @router.get("/events/{event_id}/registrations/{registration_id}")

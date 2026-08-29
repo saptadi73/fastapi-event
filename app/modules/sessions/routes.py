@@ -7,6 +7,8 @@ from app.core.dependencies import get_current_user, get_db_session, require_admi
 from app.modules.sessions import schemas
 from app.modules.sessions.service import SessionService
 from app.support.responses import success_response
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -18,7 +20,7 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db_session),
 ):
     rows = await SessionService.list_by_event(db, event_id)
-    data = [schemas.SessionRead.model_validate(row) for row in rows]
+    data = await localize_models(db, "session", rows, request_locale(request))
     return success_response("List sesi berhasil", data=data, request=request)
 
 
@@ -28,7 +30,8 @@ async def get_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
-    data = await SessionService.get(db, session_id)
+    row = await SessionService.get(db, session_id)
+    data = (await localize_models(db, "session", [row], request_locale(request)))[0]
     return success_response("Session ditemukan", data=data, request=request)
 
 

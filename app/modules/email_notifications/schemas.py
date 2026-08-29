@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
 
 
 class TemplateWrite(BaseModel):
@@ -28,6 +29,7 @@ class TemplateRead(TemplateWrite):
     id: UUID
     event_id: UUID
     trigger: str
+    locale: Literal["en", "zh-CN"]
     available_variables: list[str]
     created_at: datetime
     updated_at: datetime
@@ -53,6 +55,7 @@ class TestSendRequest(PreviewRequest):
 class LogRead(BaseModel):
     id: UUID
     trigger: str
+    locale: Literal["en", "zh-CN"]
     recipient: str
     subject: str
     entity_type: str | None

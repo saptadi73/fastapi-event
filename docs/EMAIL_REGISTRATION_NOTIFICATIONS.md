@@ -4,6 +4,26 @@ Backend mengirim email konfirmasi setelah `POST /api/v1/auth/register` berhasil.
 Email dikirim sebagai background task sehingga respons registrasi tidak tertahan
 oleh koneksi SMTP.
 
+## Locale email
+
+Setiap trigger memiliki template terpisah untuk `en` dan `zh-CN`. Endpoint admin
+template menerima query `locale`, misalnya:
+
+```http
+GET /api/v1/admin/events/{event_id}/email-notifications?locale=zh-CN
+PUT /api/v1/admin/events/{event_id}/email-notifications/payment_confirmed?locale=zh-CN
+```
+
+Email otomatis mengikuti `users.preferred_locale`. Log menyimpan locale yang
+benar-benar digunakan untuk audit. Trigger dan variabel template tetap canonical.
+Locale email sengaja mengikuti locale akun; tidak ada preferensi locale email
+terpisah. User dapat mengubahnya melalui `PUT /api/v1/auth/me`.
+Nama event, package/product, rate, serta meeting resource diambil dari content
+translation sesuai locale penerima. Jika template locale belum ada, backend
+menggunakan template `en`. Template locale yang sengaja dinonaktifkan tidak akan
+melewati pengaturan tersebut dengan fallback. Preview menampilkan
+`requested_locale`, `used_locale`, dan `translation_fallback`.
+
 Isi email:
 
 - Konfirmasi akun berhasil terdaftar pada event IWBIF 2026.

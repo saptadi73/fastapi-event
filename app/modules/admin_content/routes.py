@@ -11,6 +11,8 @@ from app.modules.admin_content import schemas
 from app.modules.admin_content.models import Announcement, Certificate
 from app.modules.users.models import User
 from app.support.responses import success_response
+from app.core.i18n import request_locale
+from app.modules.content_translations.service import localize_models
 
 router = APIRouter(tags=["admin-content"])
 
@@ -18,7 +20,8 @@ router = APIRouter(tags=["admin-content"])
 @router.get("/events/{event_id}/announcements")
 async def list_announcements(event_id: UUID, request: Request, db: AsyncSession = Depends(get_db_session)):
     rows = (await db.execute(select(Announcement).where(Announcement.event_id == event_id, Announcement.status == "published").order_by(Announcement.published_at.desc()))).scalars().all()
-    return success_response("Announcement ditemukan", [schemas.AnnouncementRead.model_validate(row) for row in rows], request=request)
+    data = await localize_models(db, "announcement", rows, request_locale(request))
+    return success_response("Announcement ditemukan", data, request=request)
 
 
 @router.get("/admin/events/{event_id}/announcements")
@@ -58,7 +61,8 @@ async def delete_announcement(item_id: UUID, request: Request, admin: User = Dep
 @router.get("/certificates/me")
 async def my_certificates(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     rows = (await db.execute(select(Certificate).where(Certificate.user_id == user.id).order_by(Certificate.issued_at.desc()))).scalars().all()
-    return success_response("Certificate ditemukan", [schemas.CertificateRead.model_validate(row) for row in rows], request=request)
+    data = await localize_models(db, "certificate", rows, request_locale(request))
+    return success_response("Certificate ditemukan", data, request=request)
 
 
 @router.get("/admin/events/{event_id}/certificates")

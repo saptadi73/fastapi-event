@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +12,7 @@ from app.core.python_compat import validate_python_version
 from app.core.database import init_db
 from app.middleware.error_handler import add_exception_handlers
 from app.middleware.request_id import RequestIdMiddleware
+from app.middleware.locale import LocaleMiddleware
 
 
 def create_app() -> FastAPI:
@@ -18,6 +20,11 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="IWBIF 2026 Event Portal API",
+        description=(
+            "IWBIF event API with English (`en`) and Simplified Chinese (`zh-CN`) support. "
+            "Use the `locale` query parameter or `Accept-Language`; query takes priority. "
+            "Machine values such as status, error codes, providers, and allowed actions remain canonical."
+        ),
         debug=settings.APP_DEBUG,
         version="1.0.0",
     )
@@ -40,10 +47,40 @@ def create_app() -> FastAPI:
     add_exception_handlers(app)
 
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(LocaleMiddleware)
 
     app.include_router(router, prefix=settings.API_PREFIX)
     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
     app.mount(settings.UPLOAD_URL_PREFIX, StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
+    def bilingual_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("parameters", {})["LocaleQuery"] = {
+            "name": "locale",
+            "in": "query",
+            "required": False,
+            "description": "Response locale. Supported values: en and zh-CN. Overrides Accept-Language.",
+            "schema": {"type": "string", "enum": ["en", "zh-CN"], "default": "en"},
+        }
+        for path_item in schema.get("paths", {}).values():
+            for method in ("get", "post", "put", "patch", "delete"):
+                operation = path_item.get(method)
+                if not operation:
+                    continue
+                parameters = operation.setdefault("parameters", [])
+                if not any(parameter.get("name") == "locale" or parameter.get("$ref", "").endswith("/LocaleQuery") for parameter in parameters):
+                    parameters.append({"$ref": "#/components/parameters/LocaleQuery"})
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = bilingual_openapi
 
     @app.on_event("startup")
     async def startup() -> None:
