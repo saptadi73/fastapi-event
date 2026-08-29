@@ -161,7 +161,7 @@ class LocaleMiddlewareTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(english["data"], chinese["data"])
         self.assertEqual({"result": "success"}, chinese["data"])
         self.assertEqual("Notifikasi DOKU diproses", english["message"])
-        self.assertEqual("操作成功", chinese["message"])
+        self.assertEqual("DOKU 通知已处理", chinese["message"])
 
 
 if __name__ == "__main__":

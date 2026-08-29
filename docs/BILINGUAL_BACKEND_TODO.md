@@ -57,6 +57,33 @@ kolom seperti `name_en`, `name_zh` pada setiap tabel tanpa keputusan arsitektur.
 - [x] Memastikan snapshot order mempertahankan nama pada saat checkout dan tidak
   berubah karena translation diedit kemudian.
 
+### 3.1 Status pengisian data translation (verifikasi 2026-08-29)
+
+Mekanisme di atas hanya berarti backend **mampu** menyimpan dan menyajikan
+translation `zh-CN`. Verifikasi query langsung ke database (`SELECT count(*)
+FROM content_translations`) pada 2026-08-29 menunjukkan **0 baris**, meskipun
+sudah ada data event live. Backend tidak melakukan auto-translation atau
+seeding otomatis untuk konten dinamis (berbeda dari template email yang sudah
+di-seed pada kedua locale). Selama data berikut belum diisi, endpoint publik
+dengan `?locale=zh-CN` akan tetap mengirim `content_locale: "source"` atau
+`"en"` dan `translation_fallback: true`, sehingga teks yang tampil tetap bahasa
+sumber, bukan Mandarin.
+
+- [ ] Mengisi translation `zh-CN` untuk setiap event live: `name`, `description`,
+  `venue_name`, `venue_address`.
+- [ ] Mengisi translation `zh-CN` untuk setiap session/agenda per event.
+- [ ] Mengisi translation `zh-CN` untuk setiap speaker: `professional_title`,
+  `organization_name`, `biography`, `expertise_tags`, `session_title`.
+- [ ] Mengisi translation `zh-CN` untuk setiap `delegate_package`,
+  `delegate_package_rate`, dan `delegate_package_facility`.
+- [ ] Mengisi translation `zh-CN` untuk setiap `product` (store item).
+- [ ] Mengisi translation `zh-CN` untuk `announcement` dan `certificate` yang
+  tayang ke publik.
+- [ ] Mengisi translation `zh-CN` untuk `event_activity`, `business_matching_slot`,
+  `matching_session`, `meeting_venue`, dan `meeting_resource`.
+- [ ] Menyediakan laporan atau endpoint coverage translation agar admin dapat
+  melihat entity mana yang belum memiliki `zh-CN` tanpa mengecek satu per satu.
+
 ## 4. Email dan notifikasi
 
 - [x] Menyimpan template email terpisah untuk `en` dan `zh-CN`.
@@ -129,6 +156,8 @@ kolom seperti `name_en`, `name_zh` pada setiap tabel tanpa keputusan arsitektur.
 Pekerjaan backend bilingual baru dapat dinyatakan selesai seluruhnya jika:
 
 - [ ] Semua konten publik yang disepakati memiliki translation `en` dan `zh-CN`.
+  Status 2026-08-29: belum terpenuhi, tabel `content_translations` masih 0 baris;
+  lihat checklist 3.1 untuk rincian entity yang perlu diisi.
 - [ ] Semua endpoint terkait mengembalikan locale yang benar dengan fallback konsisten.
 - [ ] Semua pesan pengguna dan email utama tersedia pada kedua bahasa.
 - [ ] Nilai mesin tidak berubah antar-locale.

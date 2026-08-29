@@ -49,6 +49,12 @@ WebSocket   : ws:// atau wss:// mengikuti protokol backend
 - Konten dinamis menggunakan fallback `locale diminta -> en -> field sumber`.
   Resource yang dilokalkan menyertakan `content_locale` dan
   `translation_fallback`.
+- Status data per 2026-08-29: tabel `content_translations` belum berisi data
+  `zh-CN` untuk event live manapun. Mekanisme fallback sudah aktif, tetapi
+  konten publik masih akan tampil dalam bahasa sumber sampai admin mengisi
+  translation lewat `PUT /api/v1/admin/content-translations/...`. Lihat
+  `docs/BILINGUAL_BACKEND_TODO.md` bagian 3.1 untuk daftar entity yang perlu
+  diisi.
 
 Contoh payload akun:
 

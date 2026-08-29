@@ -9,6 +9,14 @@ Locale yang didukung backend adalah:
 Jangan menerjemahkan nilai mesin seperti status, provider, trigger,
 `error.code`, ID, slug, dan `allowed_actions`.
 
+> **Status data per 2026-08-29:** mekanisme translation sudah aktif, tetapi
+> tabel `content_translations` di database saat ini masih kosong untuk seluruh
+> event live. Selama admin belum mengisi translation lewat endpoint di bagian
+> 2-4, request publik dengan `?locale=zh-CN` akan konsisten mengirim
+> `content_locale: "source"`/`"en"` dan `translation_fallback: true`. Ini
+> bukan bug backend; frontend perlu menampilkan badge fallback sesuai
+> rekomendasi di bagian 6 sampai konten Mandarin benar-benar diinput.
+
 ## 1. Pemilihan bahasa pada request publik
 
 Frontend dapat menggunakan query parameter:
@@ -90,7 +98,7 @@ Simpan versi Mandarin melalui:
 
 ```http
 PUT /api/v1/admin/content-translations/speaker/{speaker_id}/zh-CN
-Authorization: Bearer <admin-or-organizer-token>
+Authorization: Bearer <admin-token>
 Content-Type: application/json
 ```
 
@@ -115,7 +123,132 @@ Content-Type: multipart/form-data
 
 Upload foto tidak perlu dilakukan ulang untuk setiap locale.
 
-## 3. Editor agenda/program
+## 3. Editor Delegate Packages
+
+Untuk UI baru, ambil katalog package berdasarkan locale:
+
+```http
+GET /api/v1/events/{event_id}/delegate-package-catalog?locale=zh-CN
+```
+
+Endpoint lama berikut tetap tersedia untuk kompatibilitas dan mengembalikan daftar
+package secara flat:
+
+```http
+GET /api/v1/events/{event_id}/delegate-packages?locale=zh-CN
+```
+
+Satu katalog memiliki tiga entity translation yang berbeda. Frontend tidak boleh
+menyimpan seluruh terjemahan katalog hanya sebagai `delegate_package`:
+
+| Data katalog | `entity_type` | Field yang dapat diterjemahkan |
+|---|---|---|
+| Package | `delegate_package` | `name`, `description` |
+| Rate | `delegate_package_rate` | `name` |
+| Facility | `delegate_package_facility` | `name`, `description`, `unit` |
+
+Nilai seperti `id`, `code`, `package_type`, `selection_mode`, `occupancy_type`,
+`pricing_mode`, nominal, currency, urutan, dan status aktif tetap canonical dan
+tidak diterjemahkan.
+
+### 3.1 Menyimpan Mandarin package
+
+Source English tetap dibuat atau diperbarui melalui endpoint admin package yang
+sudah ada. Versi Mandarin disimpan melalui:
+
+```http
+PUT /api/v1/admin/content-translations/delegate_package/{package_id}/zh-CN
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "fields": {
+    "name": "国际代表套餐",
+    "description": "适用于参加国际论坛的代表。"
+  }
+}
+```
+
+Setiap rate dan facility harus disimpan menggunakan ID masing-masing:
+
+```http
+PUT /api/v1/admin/content-translations/delegate_package_rate/{rate_id}/zh-CN
+PUT /api/v1/admin/content-translations/delegate_package_facility/{facility_id}/zh-CN
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+Contoh rate:
+
+```json
+{
+  "fields": {
+    "name": "双人共享"
+  }
+}
+```
+
+Contoh facility:
+
+```json
+{
+  "fields": {
+    "name": "机场接送",
+    "description": "往返机场接送服务。",
+    "unit": "每位代表"
+  }
+}
+```
+
+### 3.2 Memuat editor package
+
+Ketika membuka editor, frontend mengambil source package/rate/facility dan daftar
+translation masing-masing:
+
+```http
+GET /api/v1/admin/content-translations/delegate_package/{package_id}
+GET /api/v1/admin/content-translations/delegate_package_rate/{rate_id}
+GET /api/v1/admin/content-translations/delegate_package_facility/{facility_id}
+Authorization: Bearer <admin-token>
+```
+
+Jika response `data` tidak memiliki item dengan `locale: "zh-CN"`, tampilkan
+status `Missing`. Jangan mengisi form Mandarin secara permanen dengan source
+English; source boleh ditampilkan sebagai referensi atau placeholder saja.
+
+Saat menyimpan satu katalog, perlakukan setiap request package, rate, dan facility
+secara independen. Tampilkan ID item dan `request_id` untuk item yang gagal agar
+admin dapat melakukan retry tanpa mengulang item yang sudah berhasil.
+
+### 3.3 Membaca hasil pada halaman publik
+
+Backend menambahkan metadata locale pada setiap resource yang dilokalkan. Kondisi
+berikut berarti terjemahan Mandarin tersedia:
+
+```json
+{
+  "content_locale": "zh-CN",
+  "translation_fallback": false
+}
+```
+
+Kondisi berikut bukan error pemilih bahasa. Ini berarti request `zh-CN` sudah
+diterima tetapi translation entity tersebut belum tersedia di database:
+
+```json
+{
+  "content_locale": "source",
+  "translation_fallback": true
+}
+```
+
+Badge fallback harus diperiksa pada package dan juga pada setiap rate/facility.
+Satu package dapat sudah berbahasa Mandarin sementara salah satu facility masih
+menggunakan source English.
+
+## 4. Editor agenda/program
 
 Model agenda/program menggunakan resource `session`. Source English dibuat atau
 diperbarui melalui:
@@ -166,7 +299,7 @@ PUT /api/v1/admin/content-translations/session/{session_id}/zh-CN
 }
 ```
 
-## 4. Membaca kedua versi pada dashboard editor
+## 5. Membaca kedua versi pada dashboard editor
 
 Contoh response publik English:
 
@@ -252,7 +385,7 @@ Contoh response translation:
 
 Jika array tidak memiliki `locale: "zh-CN"`, translation Mandarin belum dibuat.
 
-## 5. Rekomendasi UI editor
+## 6. Rekomendasi UI editor
 
 Gunakan dua tab:
 
@@ -292,7 +425,7 @@ Karena dua penyimpanan bukan satu transaksi HTTP, frontend harus menyimpan statu
 masing-masing request dan tidak menampilkan pesan “semua berhasil” sebelum keduanya
 berhasil.
 
-## 6. Menghapus translation
+## 7. Menghapus translation
 
 Menghapus Mandarin tidak menghapus source English:
 
@@ -303,7 +436,7 @@ DELETE /api/v1/admin/content-translations/speaker/{speaker_id}/zh-CN
 
 Setelah dihapus, request publik `locale=zh-CN` kembali memakai fallback.
 
-## 7. Error yang perlu ditangani frontend
+## 8. Error yang perlu ditangani frontend
 
 | HTTP | `error.code` | Tindakan frontend |
 |---|---|---|
@@ -317,7 +450,7 @@ Setelah dihapus, request publik `locale=zh-CN` kembali memakai fallback.
 | `400` | `INVALID_TRANSLATION_VALUE` | Tampilkan validasi pada field translation |
 | `409` | `CONFLICT` | Refresh data sebelum mencoba kembali |
 
-## 8. Auto-translation
+## 9. Auto-translation
 
 Backend saat ini **tidak menghasilkan Mandarin secara otomatis**. Backend hanya:
 
@@ -335,7 +468,7 @@ missing -> machine_draft -> reviewed -> published
 
 Frontend tidak boleh mengasumsikan endpoint auto-translation sudah tersedia.
 
-## 9. Acceptance checklist frontend
+## 10. Acceptance checklist frontend
 
 - [ ] Language switch mengirim locale yang benar.
 - [ ] English dan Mandarin dapat diedit pada dashboard.
@@ -344,6 +477,10 @@ Frontend tidak boleh mengasumsikan endpoint auto-translation sudah tersedia.
 - [ ] Dashboard dapat membaca source dan seluruh translation.
 - [ ] Badge fallback menggunakan `translation_fallback`.
 - [ ] Upload foto speaker hanya dilakukan satu kali.
+- [ ] Katalog package meminta `locale` pada endpoint publik.
+- [ ] Package, rate, dan facility Mandarin disimpan sebagai entity terpisah.
+- [ ] Badge fallback diperiksa pada package, rate, dan facility.
+- [ ] `content_locale: "source"` dan `translation_fallback: true` ditampilkan sebagai translation `Missing/Fallback`, bukan error language selector.
 - [ ] Error handling menggunakan HTTP status dan `error.code`.
 - [ ] UI menangani kegagalan salah satu dari dua request penyimpanan.
 - [ ] Tampilan publik diuji dengan `en`, `zh-CN`, dan translation yang belum ada.

@@ -10,7 +10,7 @@ from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
 from app.support.responses import success_response
 from . import schemas
-from .models import ConversationParticipant, MatchingSession, Meeting, MeetingSlot, Notification, ParticipantBlock, ParticipantReport
+from .models import ConversationParticipant, MatchingSession, Meeting, MeetingSlot, MeetingVenue, Notification, ParticipantBlock, ParticipantReport
 from .repository import BusinessMatchingRepository as Repo
 from .service import BusinessMatchingService as Service
 from .organizer_service import OrganizerMatchingService
@@ -203,7 +203,18 @@ async def slots(event_id: UUID, request: Request, user: User = Depends(get_curre
 async def resources(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     await Service.context(db, user.id, event_id)
     rows = await Repo.resources(db, event_id)
-    return success_response("Meeting resources berhasil diambil", await localize_models(db, "meeting_resource", rows, request_locale(request)), request=request)
+    locale = request_locale(request)
+    localized_resources = await localize_models(db, "meeting_resource", rows, locale)
+    venue_ids = {row.venue_id for row in rows}
+    if venue_ids:
+        venue_rows = list((await db.execute(select(MeetingVenue).where(MeetingVenue.id.in_(venue_ids)))).scalars())
+        localized_venues = {venue["id"]: venue for venue in await localize_models(db, "meeting_venue", venue_rows, locale)}
+        for resource, item in zip(rows, localized_resources):
+            venue = localized_venues.get(resource.venue_id)
+            if venue:
+                item["venue_name"] = venue["name"]
+                item["venue_location_description"] = venue.get("location_description")
+    return success_response("Meeting resources berhasil diambil", localized_resources, request=request)
 
 @router.get("/events/{event_id}/availability")
 async def availability(event_id: UUID, request: Request, participant_id: UUID | None = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
