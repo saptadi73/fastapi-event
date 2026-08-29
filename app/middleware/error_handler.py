@@ -82,7 +82,7 @@ def add_exception_handlers(app: FastAPI) -> None:
                 "message": error.get("msg", "Validation error"),
             })
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             content=fail_response("Validation failed", errors, request=request),
         )
 
