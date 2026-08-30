@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.modules.payments.models import Order, OrderStatus, Payment, PaymentChannel, PaymentProof, PaymentWebhookCapture
 from app.core.exceptions import NotFoundException
 from app.modules.email_notifications.service import deliver_payment_for_order
+from app.modules.tickets import schemas as ticket_schemas
 
 router = APIRouter(tags=["payments"])
 logger = logging.getLogger(__name__)
@@ -114,6 +115,30 @@ async def confirm_manual_payment(order_id: uuid.UUID, payload: schemas.ManualPay
     order, payment = await PaymentService.confirm_manual_payment(db, order_id, payload, admin.id)
     background_tasks.add_task(deliver_payment_for_order, order.id)
     return success_response("Pembayaran transfer manual berhasil dikonfirmasi", data={"order": schemas.OrderRead.model_validate(order), "payment": schemas.PaymentRead.model_validate(payment)}, request=request)
+
+
+@router.post("/admin/registrations/{registration_id}/offline-payments", status_code=201, summary="Record full offline payment and issue ticket")
+async def create_offline_registration_payment(
+    registration_id: uuid.UUID,
+    payload: schemas.OfflineRegistrationPaymentRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    order, payment, ticket = await PaymentService.create_offline_registration_payment(
+        db, registration_id, payload, admin.id,
+    )
+    background_tasks.add_task(deliver_payment_for_order, order.id)
+    return success_response(
+        "Pembayaran offline dikonfirmasi dan ticket tersedia",
+        data={
+            "order": schemas.OrderRead.model_validate(order),
+            "payment": schemas.PaymentRead.model_validate(payment),
+            "ticket": ticket_schemas.TicketRead.model_validate(ticket) if ticket else None,
+        },
+        request=request,
+    )
 
 
 @router.post("/payments/orders/{order_id}/manual-proof", status_code=201, summary="Upload manual transfer or static QRIS proof")

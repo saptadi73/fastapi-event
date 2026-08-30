@@ -162,7 +162,7 @@ For a partial settlement:
 - [x] Add participant partial-payment notification text.
 - [x] Add API progress fields and frontend guidance.
 - [x] Add unit/regression tests.
-- [ ] Apply Alembic revisions through `202608300039` in staging.
+- [ ] Apply Alembic revisions through `202608300040` in staging.
 - [ ] Run real Midtrans and DOKU sandbox payments for every segment.
 - [ ] Obtain provider/account-manager confirmation for the production merchant.
 - [ ] Deploy backend before frontend begins consuming the new fields.
@@ -185,7 +185,7 @@ payment as full settlement and must not process newly segmented data.
    .\.venv\Scripts\python.exe scripts\migrate_production.py --confirm-production
    ```
 
-6. Verify Alembic head `202608300039`, the new columns, constraints, and index.
+6. Verify Alembic head `202608300040`, the new columns, constraints, and index.
 7. Verify `PAYMENT_USD_TO_IDR_RATE=18000` and
    `QRIS_SEGMENT_LIMIT_IDR=9000000`, provider keys, callback/notification URLs,
    and public HTTPS reachability.

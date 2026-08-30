@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.modules.payments import schemas
 from app.modules.payments.models import DirectDebitBinding, Order, OrderKind, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent, payment_allowed_actions
@@ -354,6 +355,170 @@ class PaymentService:
         await session.commit()
         await session.refresh(manual_payment)
         return order, manual_payment
+
+    @staticmethod
+    async def _main_order_for_registration(session: AsyncSession, registration: Registration) -> Order:
+        from app.modules.iwbif.models import DelegateRegistrationPackageSelection
+        from app.modules.participants.models import ParticipantProfile
+        from app.modules.store.models import OrderItem
+
+        order = (await session.execute(
+            select(Order)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(
+                Order.registration_id == registration.id,
+                OrderItem.product_type == "delegate",
+            )
+            .order_by(Order.created_at.desc())
+            .with_for_update()
+        )).scalars().first()
+        if order:
+            return order
+
+        main = (await session.execute(
+            select(DelegateRegistrationPackageSelection)
+            .where(
+                DelegateRegistrationPackageSelection.registration_id == registration.id,
+                DelegateRegistrationPackageSelection.selection_role == "main",
+            )
+            .with_for_update()
+        )).scalar_one_or_none()
+        if not main:
+            raise ValidationException("MAIN_PACKAGE_SELECTION_REQUIRED", "Registrasi belum memiliki pilihan main package")
+        owner_id = (await session.execute(
+            select(ParticipantProfile.user_id).where(ParticipantProfile.id == registration.participant_id)
+        )).scalar_one_or_none()
+        if not owner_id:
+            raise ValidationException("REGISTRATION_OWNER_NOT_FOUND", "Pemilik registrasi tidak ditemukan")
+        order = Order(
+            user_id=owner_id,
+            registration_id=registration.id,
+            event_id=registration.event_id,
+            order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}",
+            order_kind=OrderKind.MAIN_REGISTRATION,
+            subtotal=main.selected_payment_amount,
+            discount_amount=0,
+            tax_amount=0,
+            service_fee=0,
+            total_amount=main.selected_payment_amount,
+            currency=main.payment_currency,
+            status=OrderStatus.PENDING,
+        )
+        session.add(order)
+        await session.flush()
+        session.add(OrderItem(
+            order_id=order.id,
+            product_id=None,
+            product_code=f"{main.package_code}_{main.occupancy_type}"[:60],
+            product_name=f"{main.package_name} - {main.rate_name}",
+            product_type="delegate",
+            quantity=1,
+            unit_price=main.selected_payment_amount,
+            currency=main.payment_currency,
+            line_total=main.selected_payment_amount,
+            metadata_json={
+                "delegate_package_id": str(main.delegate_package_id),
+                "delegate_package_rate_id": str(main.package_rate_id),
+                "package_type": "main",
+                "package_code": main.package_code,
+                "package_name": main.package_name,
+                "rate_name": main.rate_name,
+                "occupancy_type": main.occupancy_type,
+                "display_amount": str(main.selected_amount),
+                "display_currency": main.selected_currency,
+            },
+        ))
+        await session.flush()
+        return order
+
+    @staticmethod
+    async def create_offline_registration_payment(
+        session: AsyncSession,
+        registration_id: uuid.UUID,
+        payload: schemas.OfflineRegistrationPaymentRequest,
+        admin_user_id: uuid.UUID,
+    ):
+        from app.modules.tickets.repository import TicketRepository
+
+        registration = await session.get(Registration, registration_id, with_for_update=True)
+        if not registration or registration.status in {RegistrationStatus.CANCELED, RegistrationStatus.CANCELLED}:
+            raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi aktif tidak ditemukan")
+        receipt = payload.receipt_number.strip().upper()
+        existing = (await session.execute(
+            select(Payment).where(Payment.offline_receipt_number == receipt).with_for_update()
+        )).scalar_one_or_none()
+        if existing:
+            order = await session.get(Order, existing.order_id)
+            if not order or order.registration_id != registration.id:
+                raise ConflictException("OFFLINE_RECEIPT_ALREADY_USED", "Nomor kuitansi sudah digunakan pada registrasi lain")
+            ticket = await TicketRepository.get_by_registration(session, registration.id)
+            if existing.transaction_status == PaymentStatus.SUCCESS and order.status == OrderStatus.PAID and not ticket:
+                ticket = await TicketRepository.issue(session, registration.id)
+            return order, existing, ticket
+
+        order = await PaymentService._main_order_for_registration(session, registration)
+        if order.currency.upper() != payload.currency:
+            raise ValidationException("OFFLINE_PAYMENT_CURRENCY_MISMATCH", "Mata uang pembayaran offline tidak sesuai order")
+        paid_amount, remaining_amount = await PaymentService._payment_progress(session, order)
+        if remaining_amount == 0:
+            raise ConflictException("ORDER_ALREADY_PAID", "Main order sudah lunas")
+        amount = Decimal(str(payload.amount if payload.amount is not None else remaining_amount)).quantize(Decimal("0.01"))
+        if amount != remaining_amount:
+            raise ValidationException(
+                "OFFLINE_PAYMENT_MUST_SETTLE_REMAINDER",
+                f"Pembayaran offline harus tepat sebesar sisa tagihan {remaining_amount}",
+            )
+        paid_at = payload.paid_at or datetime.now(timezone.utc)
+        audit = {
+            "confirmed_by": str(admin_user_id),
+            "registration_id": str(registration.id),
+            "payment_method": payload.payment_method,
+            "receipt_number": receipt,
+            "amount": str(amount),
+            "currency": payload.currency,
+            "notes": payload.notes,
+            "confirmed_at": paid_at.isoformat(),
+            "previous_paid_amount": str(paid_amount),
+        }
+        payment = Payment(
+            order_id=order.id,
+            provider=payload.payment_method,
+            provider_order_id=receipt,
+            provider_transaction_id=receipt,
+            provider_reference_no=receipt,
+            offline_receipt_number=receipt,
+            confirmed_by=admin_user_id,
+            payment_type="offline",
+            channel_code=payload.payment_method.upper(),
+            gross_amount=amount,
+            currency=payload.currency,
+            transaction_status=PaymentStatus.SUCCESS,
+            paid_at=paid_at,
+            raw_response=json.dumps(audit),
+        )
+        session.add(payment)
+        await session.flush()
+        _, remaining_after, _ = await PaymentService._reconcile_order_payment(session, order)
+        if remaining_after != 0 or order.status != OrderStatus.PAID:
+            raise ValidationException("OFFLINE_PAYMENT_RECONCILIATION_FAILED", "Pembayaran offline belum melunasi main order")
+        session.add(PaymentWebhookEvent(
+            payment_id=payment.id,
+            provider=payload.payment_method,
+            request_id=f"offline-{uuid.uuid4().hex}",
+            event_status="SUCCESS",
+            payload=audit,
+        ))
+        await PaymentService._notify_payment_status(session, order, payment, admin_user_id)
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ConflictException("OFFLINE_RECEIPT_ALREADY_USED", "Nomor kuitansi sudah digunakan") from exc
+        await session.refresh(payment)
+        ticket = await TicketRepository.get_by_registration(session, registration.id)
+        if not ticket:
+            ticket = await TicketRepository.issue(session, registration.id)
+        return order, payment, ticket
 
     @staticmethod
     async def update_transaction_status(

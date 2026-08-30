@@ -109,6 +109,8 @@ class Payment(Base):
     channel_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     virtual_account_no: Mapped[str | None] = mapped_column(String(40), nullable=True)
     provider_reference_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    offline_receipt_number: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payment_instructions_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

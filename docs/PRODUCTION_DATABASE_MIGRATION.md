@@ -4,7 +4,7 @@
 > `docs/SEGMENTED_QRIS_PAYMENT_IMPLEMENTATION.md`. Checkout harus dibekukan selama
 > pergantian karena backend lama menganggap satu payment sukses sebagai pelunasan
 > penuh. Revision target setelah segmented payment dan additional package order
-> adalah `202608300039`.
+> adalah `202608300040`.
 
 ## Bilingual revisions
 

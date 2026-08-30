@@ -31,6 +31,15 @@ class ManualPaymentConfirmRequest(BaseModel):
     paid_at: datetime | None = None
 
 
+class OfflineRegistrationPaymentRequest(BaseModel):
+    payment_method: Literal["cash", "manual_transfer", "manual_qr_code", "edc", "other_offline"]
+    amount: float | None = Field(default=None, gt=0)
+    currency: Literal["IDR"] = "IDR"
+    receipt_number: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9._~/-]+$")
+    paid_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class TransactionStatusUpdateRequest(BaseModel):
     status: Literal["paid", "success", "canceled"]
     notes: str | None = Field(default=None, max_length=1000)
@@ -227,6 +236,8 @@ class PaymentRead(BaseModel):
     channel_code: str | None = None
     virtual_account_no: str | None = None
     provider_reference_no: str | None = None
+    offline_receipt_number: str | None = None
+    confirmed_by: UUID | None = None
     payment_instructions_url: str | None = None
     deleted_at: datetime | None = None
     deleted_by: UUID | None = None
