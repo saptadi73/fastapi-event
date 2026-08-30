@@ -22,7 +22,7 @@ class PaymentNotificationTests(unittest.IsolatedAsyncioTestCase):
         session.add = MagicMock()
         session.get = AsyncMock(return_value=registration)
 
-        with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id])):
+        with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id])), patch.object(PaymentService, "_payment_progress", AsyncMock(return_value=(0, 100))):
             await PaymentService._notify_payment_status(session, order, payment)
 
         added = [call.args[0] for call in session.add.call_args_list]
@@ -46,7 +46,7 @@ class PaymentNotificationTests(unittest.IsolatedAsyncioTestCase):
         session.add = MagicMock()
         session.get = AsyncMock(return_value=registration)
 
-        with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id, owner_user_id])):
+        with patch.object(PaymentService, "_admin_user_ids", AsyncMock(return_value=[admin_user_id, owner_user_id])), patch.object(PaymentService, "_payment_progress", AsyncMock(return_value=(0, 100))):
             await PaymentService._notify_payment_status(session, order, payment, actor_user_id=owner_user_id)
 
         recipients = [call.args[0].user_id for call in session.add.call_args_list]

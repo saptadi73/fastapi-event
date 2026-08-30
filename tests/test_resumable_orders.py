@@ -2,6 +2,7 @@ import unittest
 import uuid
 import json
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.dialects import postgresql
 
@@ -117,6 +118,7 @@ class ResumableOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(PaymentRepository, "get_order_for_user", AsyncMock(return_value=order)),
             patch.object(PaymentRepository, "get_payments_by_order", AsyncMock(return_value=[stale])),
+            patch.object(PaymentService, "_reconcile_order_payment", AsyncMock(return_value=(Decimal("0"), Decimal("100000"), False))),
             patch.object(PaymentService, "create_doku_checkout", AsyncMock(return_value=(checkout, order))) as create_checkout,
         ):
             response, returned_order = await PaymentService.continue_user_order_payment(
@@ -150,10 +152,11 @@ class ResumableOrderServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.modules.payments.service.get_settings", return_value=settings),
             patch("app.modules.payments.service.verify_signature", return_value=True),
             patch.object(PaymentRepository, "get_webhook_event", AsyncMock(return_value=None)),
-            patch.object(PaymentRepository, "get_order_by_number", AsyncMock(return_value=order)),
-            patch.object(PaymentRepository, "get_payment_by_order", AsyncMock(return_value=payment)),
+            patch.object(PaymentRepository, "get_payment_by_provider_order_id", AsyncMock(return_value=payment)),
+            patch.object(PaymentService, "_reconcile_order_payment", AsyncMock(return_value=(Decimal("0"), Decimal("100000"), False))),
             patch.object(PaymentService, "_notify_payment_status", AsyncMock()),
         ):
+            session.get = AsyncMock(return_value=order)
             result = await PaymentService.handle_doku_notification(session, body, headers)
 
         self.assertEqual("failed", result)

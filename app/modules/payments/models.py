@@ -10,9 +10,17 @@ from app.core.database import Base
 class OrderStatus(str):
     DRAFT = "draft"
     PENDING = "pending"
+    PARTIALLY_PAID = "partially_paid"
     PAID = "paid"
     EXPIRED = "expired"
     CANCELED = "canceled"
+
+
+class OrderKind(str):
+    LEGACY = "legacy"
+    MAIN_REGISTRATION = "main_registration"
+    ADDITIONAL = "additional"
+    EXHIBITOR = "exhibitor"
 
 
 class PaymentStatus(str):
@@ -45,7 +53,7 @@ def order_allowed_actions(
 ) -> list[str]:
     if status == OrderStatus.PAID or (status == OrderStatus.CANCELED and canceled_by is not None):
         return []
-    if status in {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.EXPIRED, OrderStatus.CANCELED}:
+    if status in {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.EXPIRED, OrderStatus.CANCELED}:
         return ["continue_payment", "cancel"]
     return []
 
@@ -59,6 +67,7 @@ class Order(Base):
     registration_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("registrations.id"), nullable=True)
     event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
     order_number: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    order_kind: Mapped[str] = mapped_column(String(30), nullable=False, default=OrderKind.LEGACY)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     discount_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     tax_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
@@ -87,6 +96,8 @@ class Payment(Base):
     provider_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     payment_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     gross_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    payment_sequence: Mapped[int | None] = mapped_column(nullable=True)
+    payment_sequence_count: Mapped[int | None] = mapped_column(nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="IDR")
     transaction_status: Mapped[str] = mapped_column(String(30), default=PaymentStatus.CREATED)
     fraud_status: Mapped[str | None] = mapped_column(String(30), nullable=True)

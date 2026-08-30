@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
 from app.modules.payments import schemas
-from app.modules.payments.models import DirectDebitBinding, Order, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent, payment_allowed_actions
+from app.modules.payments.models import DirectDebitBinding, Order, OrderKind, OrderStatus, Payment, PaymentProof, PaymentStatus, PaymentWebhookEvent, payment_allowed_actions
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
@@ -34,6 +34,129 @@ logger = logging.getLogger(__name__)
 class PaymentService:
     PAYMENT_PROOF_MIMES = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
     MAX_PAYMENT_PROOF_SIZE = 10 * 1024 * 1024
+
+    @staticmethod
+    def _segment_plan(total_amount: Decimal) -> list[Decimal]:
+        """Return deterministic gateway chunks using the organizer's USD 500 rule."""
+        total = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+        limit = Decimal(str(get_settings().QRIS_SEGMENT_LIMIT_IDR))
+        if total <= limit:
+            return [total]
+        chunks: list[Decimal] = []
+        remaining = total
+        while remaining > 0:
+            amount = min(limit, remaining)
+            chunks.append(amount)
+            remaining -= amount
+        return chunks
+
+    @staticmethod
+    async def _payment_progress(session: AsyncSession, order: Order) -> tuple[Decimal, Decimal]:
+        """Sum settled value once per logical segment, while preserving legacy rows."""
+        payments = list((await session.execute(
+            select(Payment).where(
+                Payment.order_id == order.id,
+                Payment.transaction_status == PaymentStatus.SUCCESS,
+                Payment.deleted_at.is_(None),
+            ).order_by(Payment.created_at, Payment.id)
+        )).scalars().all())
+        paid = Decimal("0")
+        settled_sequences: set[int] = set()
+        for payment in payments:
+            if payment.payment_sequence is not None:
+                if payment.payment_sequence in settled_sequences:
+                    continue
+                settled_sequences.add(payment.payment_sequence)
+            paid += Decimal(str(payment.gross_amount))
+        total = Decimal(str(order.total_amount))
+        paid = min(paid, total)
+        return paid, max(total - paid, Decimal("0"))
+
+    @staticmethod
+    async def _reconcile_order_payment(session: AsyncSession, order: Order) -> tuple[Decimal, Decimal, bool]:
+        """Make the parent order/registration reflect aggregate settled funds."""
+        previous_status = order.status
+        paid, remaining = await PaymentService._payment_progress(session, order)
+        if remaining == 0 and paid > 0:
+            order.status = OrderStatus.PAID
+        elif paid > 0:
+            order.status = OrderStatus.PARTIALLY_PAID
+        elif order.status not in {OrderStatus.CANCELED, OrderStatus.EXPIRED}:
+            order.status = OrderStatus.PENDING
+        if order.status in {OrderStatus.PAID, OrderStatus.PARTIALLY_PAID}:
+            order.canceled_at = order.canceled_by = order.cancellation_reason = None
+        if order.registration_id and order.order_kind != OrderKind.ADDITIONAL:
+            registration = await session.get(Registration, order.registration_id, with_for_update=True)
+            if registration and registration.status != RegistrationStatus.CONFIRMED:
+                registration.status = (
+                    RegistrationStatus.PAID
+                    if order.status == OrderStatus.PAID
+                    else RegistrationStatus.PAYMENT_PENDING
+                )
+        if order.status == OrderStatus.PAID and order.order_kind == OrderKind.ADDITIONAL:
+            await PaymentService._activate_paid_additional_packages(session, order)
+        return paid, remaining, previous_status != OrderStatus.PAID and order.status == OrderStatus.PAID
+
+    @staticmethod
+    async def _activate_paid_additional_packages(session: AsyncSession, order: Order) -> None:
+        """Idempotently attach settled add-ons to the existing registration."""
+        if not order.registration_id:
+            raise ValidationException("ADDITIONAL_REGISTRATION_REQUIRED", "Order additional tidak terhubung ke registrasi")
+        from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate, DelegateRegistrationPackageSelection
+        from app.modules.store.models import OrderItem, Product
+
+        rows = (await session.execute(
+            select(DelegatePackage, DelegatePackageRate, OrderItem)
+            .join(DelegatePackageRate, DelegatePackageRate.delegate_package_id == DelegatePackage.id)
+            .join(Product, Product.delegate_package_rate_id == DelegatePackageRate.id)
+            .join(OrderItem, OrderItem.product_id == Product.id)
+            .where(
+                OrderItem.order_id == order.id,
+                DelegatePackage.package_type == "additional",
+                Product.product_type == "additional",
+            )
+        )).all()
+        if not rows:
+            raise ValidationException("ADDITIONAL_ORDER_ITEMS_REQUIRED", "Order additional tidak memiliki item additional yang valid")
+        for package, rate, item in rows:
+            existing = (await session.execute(select(DelegateRegistrationPackageSelection.id).where(
+                DelegateRegistrationPackageSelection.registration_id == order.registration_id,
+                DelegateRegistrationPackageSelection.delegate_package_id == package.id,
+            ).limit(1))).scalar_one_or_none()
+            if existing:
+                continue
+            snapshot = item.metadata_json or {}
+            session.add(DelegateRegistrationPackageSelection(
+                registration_id=order.registration_id,
+                delegate_package_id=package.id,
+                package_rate_id=rate.id,
+                source_order_id=order.id,
+                selection_role="additional",
+                occupancy_type=snapshot.get("occupancy_type", rate.occupancy_type),
+                package_code=snapshot.get("package_code", package.code),
+                package_name=snapshot.get("package_name", package.name),
+                rate_name=snapshot.get("rate_name", rate.name),
+                selected_amount=snapshot.get("display_amount", rate.amount),
+                selected_currency=snapshot.get("display_currency", rate.currency),
+                selected_payment_amount=item.unit_price,
+                payment_currency=item.currency,
+            ))
+
+    @staticmethod
+    async def _next_payment_segment(session: AsyncSession, order: Order) -> tuple[int, int, Decimal]:
+        plan = PaymentService._segment_plan(Decimal(str(order.total_amount)))
+        successful = set((await session.execute(
+            select(Payment.payment_sequence).where(
+                Payment.order_id == order.id,
+                Payment.transaction_status == PaymentStatus.SUCCESS,
+                Payment.deleted_at.is_(None),
+                Payment.payment_sequence.is_not(None),
+            )
+        )).scalars().all())
+        for index, amount in enumerate(plan, start=1):
+            if index not in successful:
+                return index, len(plan), amount
+        raise ConflictException("ORDER_ALREADY_PAID", "Seluruh bagian pembayaran order sudah lunas")
 
     @staticmethod
     async def submit_manual_payment_proof(session: AsyncSession, order_id: uuid.UUID, user_id: uuid.UUID, payment_method: str, transfer_reference: str | None, notes: str | None, file) -> tuple[Payment, PaymentProof]:
@@ -161,6 +284,18 @@ class PaymentService:
             return
         event_id = registration.event_id
         payment_reference = payment.provider_transaction_id or payment.provider_order_id or payment.provider_reference_no or ""
+        paid_amount, remaining_amount = await PaymentService._payment_progress(db, order)
+        if remaining_amount > 0 and paid_amount > 0:
+            participant_body = (
+                f"Pembayaran bagian {payment.payment_sequence or '-'} untuk order {order.order_number} berhasil. "
+                f"Total diterima Rp{paid_amount:,.0f}; sisa Rp{remaining_amount:,.0f}. "
+                "Ticket dan proses lanjutan belum tersedia sampai seluruh pembayaran lunas. "
+                "Pembagian diterapkan karena batas nominal transaksi QRIS Bank Indonesia."
+            )
+        elif remaining_amount == 0 and paid_amount > 0:
+            participant_body = f"Seluruh pembayaran order {order.order_number} telah lunas. Ticket dan proses lanjutan kini eligible."
+        else:
+            participant_body = f"Pembayaran {payment.provider or 'provider'} untuk order {order.order_number} menjadi {payment.transaction_status}. Ref: {payment_reference or '-'}"
         recipients = [order.user_id]
         recipients.extend(await PaymentService._admin_user_ids(db))
         if actor_user_id:
@@ -171,7 +306,7 @@ class PaymentService:
                 event_id=event_id,
                 type="payment_status_update",
                 title="Status pembayaran berubah",
-                body=f"Pembayaran {payment.provider or 'provider'} untuk order {order.order_number} menjadi {payment.transaction_status}. Ref: {payment_reference or '-'}",
+                body=participant_body,
                 entity_type="order",
                 entity_id=order.id,
             ))
@@ -212,11 +347,7 @@ class PaymentService:
         manual_payment.transaction_status = PaymentStatus.SUCCESS
         manual_payment.paid_at = paid_at
         manual_payment.raw_response = json.dumps(confirmation)
-        order.status = OrderStatus.PAID
-        if order.registration_id:
-            registration = await session.get(Registration, order.registration_id, with_for_update=True)
-            if registration and registration.status != RegistrationStatus.CONFIRMED:
-                registration.status = RegistrationStatus.PAID
+        await PaymentService._reconcile_order_payment(session, order)
         await session.flush()
         session.add(PaymentWebhookEvent(payment_id=manual_payment.id, provider=payload.payment_method, request_id=f"manual-{uuid.uuid4().hex}", event_status="SUCCESS", payload=confirmation))
         await PaymentService._notify_payment_status(session, order, manual_payment, admin_user_id)
@@ -254,12 +385,7 @@ class PaymentService:
                 )
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = payload.paid_at or payment.paid_at or now
-            order.status = OrderStatus.PAID
-            order.canceled_at = order.canceled_by = order.cancellation_reason = None
-            if order.registration_id:
-                registration = await session.get(Registration, order.registration_id, with_for_update=True)
-                if registration and registration.status != RegistrationStatus.CONFIRMED:
-                    registration.status = RegistrationStatus.PAID
+            await PaymentService._reconcile_order_payment(session, order)
             event_status = "SUCCESS"
         else:
             if requested_status not in allowed_actions:
@@ -269,25 +395,12 @@ class PaymentService:
                 )
             payment.transaction_status = PaymentStatus.CANCELED
             payment.paid_at = None
-            another_success = bool((await session.execute(
-                select(Payment.id).where(
-                    Payment.order_id == order.id,
-                    Payment.id != payment.id,
-                    Payment.transaction_status == PaymentStatus.SUCCESS,
-                    Payment.deleted_at.is_(None),
-                ).limit(1)
-            )).scalar_one_or_none())
-            order.status = OrderStatus.PAID if another_success else OrderStatus.CANCELED
-            if another_success:
-                order.canceled_at = order.canceled_by = order.cancellation_reason = None
-            else:
+            paid, _, _ = await PaymentService._reconcile_order_payment(session, order)
+            if paid == 0:
+                order.status = OrderStatus.CANCELED
                 order.canceled_at = now
                 order.canceled_by = actor_user_id
                 order.cancellation_reason = payload.notes
-            if order.registration_id and not another_success:
-                registration = await session.get(Registration, order.registration_id, with_for_update=True)
-                if registration and registration.status == RegistrationStatus.PAID:
-                    registration.status = RegistrationStatus.PAYMENT_PENDING
             event_status = "CANCELED"
 
         audit_payload = {
@@ -352,18 +465,7 @@ class PaymentService:
             },
         ))
 
-        remaining_success = bool((await session.execute(
-            select(Payment.id).where(
-                Payment.order_id == order_id,
-                Payment.transaction_status == PaymentStatus.SUCCESS,
-                Payment.deleted_at.is_(None),
-            ).limit(1)
-        )).scalar_one_or_none())
-        order.status = OrderStatus.PAID if remaining_success else OrderStatus.PENDING
-        if order.registration_id and not remaining_success:
-            registration = await session.get(Registration, order.registration_id, with_for_update=True)
-            if registration and registration.status == RegistrationStatus.PAID:
-                registration.status = RegistrationStatus.PAYMENT_PENDING
+        await PaymentService._reconcile_order_payment(session, order)
         if commit:
             await session.commit()
             await session.refresh(payment)
@@ -412,31 +514,38 @@ class PaymentService:
         order = await PaymentRepository.get_latest_order(session, registration.id)
         if order and order.status == OrderStatus.PAID:
             raise ConflictException("ORDER_ALREADY_PAID", "Registrasi ini sudah dibayar")
-        if not order or order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+        if not order or order.status not in {OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT}:
             order = await PaymentRepository.create_order(session, registration.id)
         if order.currency.upper() != "IDR":
             raise ValidationException("DOKU_IDR_REQUIRED", "QRIS hanya menerima tagihan IDR")
-        payment = await PaymentRepository.get_payment_by_order(session, order.id)
-        if payment and payment.provider not in {"doku", "doku_snap_qris"}:
-            raise ConflictException("LEGACY_PAYMENT_PENDING", "Batalkan transaksi gateway lama terlebih dahulu")
+        sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, order)
+        payment = (await session.execute(select(Payment).where(
+            Payment.order_id == order.id,
+            Payment.provider == "doku_snap_qris",
+            Payment.payment_sequence == sequence,
+            Payment.deleted_at.is_(None),
+        ).order_by(Payment.created_at.desc()))).scalars().first()
+        if payment and payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING} and payment.payment_instructions_url:
+            paid, remaining = await PaymentService._payment_progress(session, order)
+            return schemas.DokuQrisResponse(payment_id=payment.id, order_id=order.id, order_number=order.order_number, status=payment.transaction_status, qr_content=payment.payment_instructions_url, amount=float(payment.gross_amount), currency=order.currency, expires_at=order.expires_at, payment_sequence=sequence, payment_sequence_count=sequence_count, paid_amount=float(paid), remaining_amount=float(remaining))
         reference = f"QR{uuid.uuid4().hex[:20].upper()}"
-        body = {"partnerReferenceNo": reference, "amount": {"value": str(order.total_amount), "currency": "IDR"}, "additionalInfo": {"feeType": "1"}}
+        body = {"partnerReferenceNo": reference, "amount": {"value": str(segment_amount), "currency": "IDR"}, "additionalInfo": {"feeType": "1", "orderId": str(order.id), "paymentSequence": sequence}}
         if order.expires_at:
             body["validityPeriod"] = order.expires_at.astimezone().isoformat(timespec="seconds")
         response, external_id = await DokuSnapClient().create_qris(body)
         qr_content = str(response.get("qrContent") or "")
         if not qr_content:
             raise ValidationException("DOKU_QRIS_CONTENT_MISSING", "DOKU tidak mengembalikan konten QRIS")
-        from app.modules.payments.models import Payment
         if not payment:
-            payment = Payment(order_id=order.id, provider="doku_snap_qris", gross_amount=order.total_amount, currency=order.currency)
+            payment = Payment(order_id=order.id, provider="doku_snap_qris", gross_amount=segment_amount, currency=order.currency, payment_sequence=sequence, payment_sequence_count=sequence_count)
             session.add(payment)
         payment.provider, payment.provider_order_id, payment.payment_type, payment.channel_code = "doku_snap_qris", reference, "doku_snap_qris", "QRIS"
         payment.external_id, payment.provider_reference_no, payment.payment_instructions_url = external_id, response.get("referenceNo"), qr_content
         payment.raw_response, payment.transaction_status = json.dumps(response), PaymentStatus.PENDING
         await session.commit()
         await session.refresh(payment)
-        return schemas.DokuQrisResponse(payment_id=payment.id, order_id=order.id, order_number=order.order_number, status=payment.transaction_status, qr_content=qr_content, amount=float(order.total_amount), currency=order.currency, expires_at=order.expires_at)
+        paid, remaining = await PaymentService._payment_progress(session, order)
+        return schemas.DokuQrisResponse(payment_id=payment.id, order_id=order.id, order_number=order.order_number, status=payment.transaction_status, qr_content=qr_content, amount=float(payment.gross_amount), currency=order.currency, expires_at=order.expires_at, payment_sequence=sequence, payment_sequence_count=sequence_count, paid_amount=float(paid), remaining_amount=float(remaining))
 
     @staticmethod
     async def create_doku_direct_debit_binding(session: AsyncSession, payload: schemas.CreateDirectDebitBindingRequest, user_id: uuid.UUID) -> schemas.DirectDebitBindingResponse:
@@ -642,17 +751,15 @@ class PaymentService:
         provider = "doku_snap_va"
         duplicate = await PaymentRepository.get_webhook_event(session, external_id, provider)
         if not duplicate:
-            order.status = OrderStatus.PAID
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = datetime.now(timezone.utc)
             payment.raw_response = json.dumps(payload)
-            registration = await session.get(Registration, order.registration_id, with_for_update=True)
-            if registration and registration.status != RegistrationStatus.CONFIRMED:
-                registration.status = RegistrationStatus.PAID
+            _, remaining, became_paid = await PaymentService._reconcile_order_payment(session, order)
             await PaymentService._notify_payment_status(session, order, payment)
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status="SUCCESS", payload=payload))
             await session.commit()
-            asyncio.create_task(deliver_payment_for_order(order.id))
+            if became_paid and remaining == 0:
+                asyncio.create_task(deliver_payment_for_order(order.id))
         return {"responseCode": "2002500", "responseMessage": "Successful", "virtualAccountData": {"partnerServiceId": payload.get("partnerServiceId"), "customerNo": payload.get("customerNo"), "virtualAccountNo": payload.get("virtualAccountNo"), "virtualAccountName": payload.get("virtualAccountName"), "trxId": payload.get("trxId"), "paymentRequestId": payload.get("paymentRequestId"), "paidAmount": payload.get("paidAmount")}}
 
     @staticmethod
@@ -694,18 +801,16 @@ class PaymentService:
         if not await PaymentRepository.get_webhook_event(session, external_id, provider):
             notify_paid = status in {"SUCCESS", "PAID", "00"}
             if status in {"SUCCESS", "PAID", "00"}:
-                order.status, payment.transaction_status, payment.paid_at = OrderStatus.PAID, PaymentStatus.SUCCESS, datetime.now(timezone.utc)
-                registration = await session.get(Registration, order.registration_id, with_for_update=True)
-                if registration and registration.status != RegistrationStatus.CONFIRMED:
-                    registration.status = RegistrationStatus.PAID
+                payment.transaction_status, payment.paid_at = PaymentStatus.SUCCESS, datetime.now(timezone.utc)
             elif status in {"FAILED", "CANCELLED", "CANCELED"}:
-                order.status, payment.transaction_status = OrderStatus.PENDING, PaymentStatus.FAILED
+                payment.transaction_status = PaymentStatus.FAILED
+            _, remaining, became_paid = await PaymentService._reconcile_order_payment(session, order)
             await PaymentService._notify_payment_status(session, order, payment)
             payment.channel_code = channel_value or channel_key
             payment.raw_response = json.dumps(payload)
             session.add(PaymentWebhookEvent(payment_id=payment.id, provider=provider, request_id=external_id, event_status=status, payload=payload))
             await session.commit()
-            if notify_paid:
+            if notify_paid and became_paid and remaining == 0:
                 asyncio.create_task(deliver_payment_for_order(order.id))
         return {"responseCode": "2005400", "responseMessage": "Successful", "partnerReferenceNo": reference, "additionalInfo": {}}
     @staticmethod
@@ -723,9 +828,9 @@ class PaymentService:
             if latest_order.status == OrderStatus.PAID:
                 latest_payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
                 return schemas.DokuCheckoutResponse(payment_url="", already_paid=True, payment_id=latest_payment.id if latest_payment else None, order_status=latest_order.status, requires_payment=False), latest_order
-            if latest_order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+            if latest_order.status not in {OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT}:
                 raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
-            payment = await PaymentRepository.get_payment_by_order(session, latest_order.id, "doku")
+            payment = None
         else:
             latest_order = None
             payment = None
@@ -768,11 +873,18 @@ class PaymentService:
                 latest_order,
             )
 
-        if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.DRAFT]:
-            payment = payment or await PaymentRepository.get_payment_by_order(session, latest_order.id, "doku")
+        if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT]:
+            sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, latest_order)
+            payment = (await session.execute(select(Payment).where(
+                Payment.order_id == latest_order.id,
+                Payment.provider == "doku",
+                Payment.payment_sequence == sequence,
+                Payment.deleted_at.is_(None),
+            ).order_by(Payment.created_at.desc()))).scalars().first()
             reusable_url = PaymentService._reusable_doku_checkout_url(payment)
             if reusable_url:
-                return (schemas.DokuCheckoutResponse(payment_url=reusable_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True), latest_order)
+                paid, remaining = await PaymentService._payment_progress(session, latest_order)
+                return (schemas.DokuCheckoutResponse(payment_url=reusable_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True, payment_sequence=sequence, payment_sequence_count=sequence_count, payment_amount=float(segment_amount), paid_amount=float(paid), remaining_amount=float(remaining)), latest_order)
             if payment and (
                 payment.checkout_url
                 or payment.transaction_status not in {PaymentStatus.CREATED, PaymentStatus.PENDING}
@@ -784,14 +896,18 @@ class PaymentService:
             if not payment:
                 payment = Payment(
                     order_id=latest_order.id, provider="doku",
-                    gross_amount=latest_order.total_amount, currency=latest_order.currency,
+                    gross_amount=segment_amount, currency=latest_order.currency,
+                    payment_sequence=sequence, payment_sequence_count=sequence_count,
                     transaction_status=PaymentStatus.CREATED,
                 )
                 session.add(payment)
                 await session.flush()
         else:
             latest_order = await PaymentRepository.create_order(session, registration.id)
-            payment = await PaymentRepository.create_doku_payment(session, latest_order)
+            sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, latest_order)
+            payment = Payment(order_id=latest_order.id, provider="doku", gross_amount=segment_amount, currency=latest_order.currency, payment_sequence=sequence, payment_sequence_count=sequence_count, transaction_status=PaymentStatus.CREATED)
+            session.add(payment)
+            await session.flush()
 
         participant = await session.get(ParticipantProfile, registration.participant_id) if registration else None
         user = await session.get(User, participant.user_id) if participant else await session.get(User, user_id)
@@ -808,16 +924,17 @@ class PaymentService:
         customer_id = str(participant.id) if participant else str(user.id)
         from app.modules.store.models import OrderItem
         order_items = list((await session.execute(select(OrderItem).where(OrderItem.order_id == latest_order.id))).scalars())
-        amount = float(latest_order.total_amount)
+        amount = float(payment.gross_amount)
         if amount.is_integer(): amount = int(amount)
+        provider_invoice = f"{latest_order.order_number}-P{payment.payment_sequence:02d}-{uuid.uuid4().hex[:6].upper()}"
         request_body = {
             "order": {
                 "amount": amount,
-                "invoice_number": latest_order.order_number,
+                "invoice_number": provider_invoice,
                 "currency": latest_order.currency,
                 "callback_url": get_settings().DOKU_CALLBACK_URL,
                 "auto_redirect": True,
-                "line_items": ([{"name": item.product_name, "price": float(item.unit_price), "quantity": item.quantity} for item in order_items] or [{"name": f"IWBIF 2026 - {registration.registration_number if registration else latest_order.order_number}", "price": amount, "quantity": 1}]),
+                "line_items": [{"name": f"{event.name} - pembayaran {payment.payment_sequence}/{payment.payment_sequence_count}", "price": amount, "quantity": 1}],
             },
             "payment": {"payment_due_date": get_settings().DOKU_PAYMENT_DUE_MINUTES},
             "customer": {"id": customer_id, "name": customer_name, "email": user.email, "phone": user.phone or ""},
@@ -830,12 +947,13 @@ class PaymentService:
             raise ValidationException("DOKU_PAYMENT_URL_MISSING", "DOKU tidak mengembalikan payment URL")
         payment.provider = "doku"
         payment.provider_transaction_id = request_id
-        payment.provider_order_id = latest_order.order_number
+        payment.provider_order_id = provider_invoice
         payment.checkout_url = payment_url
         payment.raw_response = json.dumps(response)
         payment.transaction_status = PaymentStatus.PENDING
         payment.expired_at = datetime.now(timezone.utc) + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)
         await session.commit(); await session.refresh(payment)
+        paid, remaining = await PaymentService._payment_progress(session, latest_order)
         return (
             schemas.DokuCheckoutResponse(
                 payment_url=payment_url,
@@ -845,6 +963,11 @@ class PaymentService:
                 payment_id=payment.id,
                 order_status=latest_order.status,
                 requires_payment=True,
+                payment_sequence=payment.payment_sequence,
+                payment_sequence_count=payment.payment_sequence_count,
+                payment_amount=float(payment.gross_amount),
+                paid_amount=float(paid),
+                remaining_amount=float(remaining),
             ), latest_order,
         )
 
@@ -865,7 +988,7 @@ class PaymentService:
             if not registration:
                 raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan untuk akun ini")
             order = await PaymentRepository.get_latest_order(session, registration.id)
-            if not order or order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT, OrderStatus.PAID}:
+            if not order or order.status not in {OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT, OrderStatus.PAID}:
                 order = await PaymentRepository.create_order(session, registration.id)
 
         if order.status == OrderStatus.PAID:
@@ -875,18 +998,28 @@ class PaymentService:
                 payment_id=paid_payment.id if paid_payment else None,
                 order_status=order.status, requires_payment=False,
             ), order
-        if order.status not in {OrderStatus.PENDING, OrderStatus.DRAFT}:
+        if order.status not in {OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT}:
             raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
         if order.currency.upper() != "IDR" or Decimal(str(order.total_amount)) != Decimal(str(order.total_amount)).to_integral_value():
             raise ValidationException("MIDTRANS_IDR_REQUIRED", "Midtrans memerlukan tagihan IDR tanpa desimal")
 
-        payment = await PaymentRepository.get_payment_by_order(session, order.id, "midtrans")
+        sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, order)
+        payment = (await session.execute(select(Payment).where(
+            Payment.order_id == order.id,
+            Payment.provider == "midtrans",
+            Payment.payment_sequence == sequence,
+            Payment.deleted_at.is_(None),
+        ).order_by(Payment.created_at.desc()))).scalars().first()
         now = datetime.now(timezone.utc)
         token = PaymentService._reusable_midtrans_token(payment, now)
         if token:
             return schemas.MidtransCheckoutResponse(
                 payment_url=payment.checkout_url, token=token, expires_at=payment.expired_at,
                 payment_id=payment.id, order_status=order.status,
+                payment_sequence=sequence, payment_sequence_count=sequence_count,
+                payment_amount=float(segment_amount),
+                paid_amount=float((await PaymentService._payment_progress(session, order))[0]),
+                remaining_amount=float((await PaymentService._payment_progress(session, order))[1]),
             ), order
 
         # Preserve the old attempt so a delayed Midtrans webhook can still be
@@ -915,7 +1048,7 @@ class PaymentService:
         request_body = {
             "transaction_details": {
                 "order_id": midtrans_order_id,
-                "gross_amount": int(Decimal(str(order.total_amount))),
+                "gross_amount": int(segment_amount),
             },
             "customer_details": {
                 "first_name": (participant.full_name if participant else user.full_name) or user.email,
@@ -932,7 +1065,7 @@ class PaymentService:
         if not token or not payment_url:
             raise ValidationException("MIDTRANS_PAYMENT_URL_MISSING", "Midtrans tidak mengembalikan token dan payment URL")
         if not payment:
-            payment = Payment(order_id=order.id, provider="midtrans", gross_amount=order.total_amount, currency=order.currency)
+            payment = Payment(order_id=order.id, provider="midtrans", gross_amount=segment_amount, currency=order.currency, payment_sequence=sequence, payment_sequence_count=sequence_count)
             session.add(payment)
         payment.provider_order_id = midtrans_order_id
         payment.payment_type = "midtrans_snap"
@@ -942,9 +1075,12 @@ class PaymentService:
         payment.expired_at = datetime.now(timezone.utc) + timedelta(minutes=settings.MIDTRANS_PAYMENT_DUE_MINUTES)
         await session.commit()
         await session.refresh(payment)
+        paid, remaining = await PaymentService._payment_progress(session, order)
         return schemas.MidtransCheckoutResponse(
             payment_url=payment_url, token=token, expires_at=payment.expired_at,
             payment_id=payment.id, order_status=order.status,
+            payment_sequence=sequence, payment_sequence_count=sequence_count,
+            payment_amount=float(segment_amount), paid_amount=float(paid), remaining_amount=float(remaining),
         ), order
 
     @staticmethod
@@ -969,8 +1105,8 @@ class PaymentService:
         order = await session.get(Order, payment.order_id, with_for_update=True)
         if not order:
             raise NotFoundException("MIDTRANS_ORDER_NOT_FOUND", "Order Midtrans tidak ditemukan")
-        if Decimal(str(verified.get("gross_amount"))) != Decimal(str(order.total_amount)):
-            raise ValidationException("MIDTRANS_AMOUNT_MISMATCH", "Nominal Midtrans tidak sesuai order")
+        if Decimal(str(verified.get("gross_amount"))) != Decimal(str(payment.gross_amount)):
+            raise ValidationException("MIDTRANS_AMOUNT_MISMATCH", "Nominal Midtrans tidak sesuai bagian pembayaran")
 
         transaction_status = str(verified.get("transaction_status") or "").lower()
         fraud_status = str(verified.get("fraud_status") or "").lower()
@@ -980,12 +1116,8 @@ class PaymentService:
 
         successful = transaction_status == "settlement" or (transaction_status == "capture" and fraud_status == "accept")
         if successful:
-            order.status = OrderStatus.PAID
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = datetime.now(timezone.utc)
-            registration = await session.get(Registration, order.registration_id, with_for_update=True) if order.registration_id else None
-            if registration and registration.status != RegistrationStatus.CONFIRMED:
-                registration.status = RegistrationStatus.PAID
         elif transaction_status in {"deny", "cancel", "failure"}:
             payment.transaction_status = PaymentStatus.FAILED
         elif transaction_status == "expire":
@@ -1004,13 +1136,14 @@ class PaymentService:
         payment.fraud_status = fraud_status or None
         safe_payload = {key: value for key, value in verified.items() if key != "signature_key"}
         payment.raw_response = json.dumps(safe_payload)
+        _, remaining, became_paid = await PaymentService._reconcile_order_payment(session, order)
         await PaymentService._notify_payment_status(session, order, payment)
         session.add(PaymentWebhookEvent(
             payment_id=payment.id, provider="midtrans", request_id=event_id,
             event_status=transaction_status.upper(), payload=safe_payload,
         ))
         await session.commit()
-        if successful:
+        if successful and became_paid and remaining == 0:
             asyncio.create_task(deliver_payment_for_order(order.id))
         return payment.transaction_status
 
@@ -1038,6 +1171,7 @@ class PaymentService:
             select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)
         )).scalars().all())
         payments = await PaymentRepository.get_payments_by_order(session, order.id)
+        paid_amount, remaining_amount = await PaymentService._payment_progress(session, order)
         return schemas.UserOrderDetail(
             order=schemas.OrderRead.model_validate(order),
             items=[schemas.OrderItemRead(
@@ -1049,6 +1183,9 @@ class PaymentService:
             ) for item in items],
             latest_payment=schemas.PaymentRead.model_validate(payments[0]) if payments else None,
             payment_attempts=[schemas.PaymentRead.model_validate(payment) for payment in payments],
+            paid_amount=float(paid_amount),
+            remaining_amount=float(remaining_amount),
+            is_payment_complete=remaining_amount == 0,
         )
 
     @staticmethod
@@ -1057,7 +1194,7 @@ class PaymentService:
         event_id: uuid.UUID | None, page: int, size: int,
     ) -> tuple[list[schemas.UserOrderDetail], int]:
         valid_statuses = {
-            OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PAID,
+            OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.PAID,
             OrderStatus.EXPIRED, OrderStatus.CANCELED,
         }
         if status and status not in valid_statuses:
@@ -1124,12 +1261,12 @@ class PaymentService:
         if "continue_payment" not in order.allowed_actions:
             raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dilanjutkan ke pembayaran")
         payments = await PaymentRepository.get_payments_by_order(session, order.id, lock=True)
-        if any(payment.transaction_status == PaymentStatus.SUCCESS for payment in payments):
-            order.status = OrderStatus.PAID
+        _, remaining, _ = await PaymentService._reconcile_order_payment(session, order)
+        if remaining == 0:
             await session.commit()
             raise ConflictException("ORDER_ALREADY_PAID", "Order sudah dibayar")
 
-        order.status = OrderStatus.PENDING
+        order.status = OrderStatus.PARTIALLY_PAID if any(payment.transaction_status == PaymentStatus.SUCCESS for payment in payments) else OrderStatus.PENDING
         order.canceled_at = order.canceled_by = order.cancellation_reason = None
         await session.flush()
         checkout_payload = schemas.CreateDokuCheckoutRequest(order_id=order.id)
@@ -1260,37 +1397,32 @@ class PaymentService:
         status = str(transaction.get("status") or payload.get("payment", {}).get("status") or "").upper()
         if not order_number or not status:
             raise ValidationException("DOKU_INVALID_PAYLOAD", "Invoice number dan transaction status wajib ada")
-        order = await PaymentRepository.get_order_by_number(session, order_number, lock=True)
+        payment = await PaymentRepository.get_payment_by_provider_order_id(session, order_number, lock=True, provider="doku")
+        if not payment:
+            raise NotFoundException("DOKU_PAYMENT_NOT_FOUND", "Payment DOKU tidak ditemukan")
+        order = await session.get(Order, payment.order_id, with_for_update=True)
         if not order:
             raise NotFoundException("DOKU_ORDER_NOT_FOUND", "Order DOKU tidak ditemukan")
         if await PaymentRepository.get_webhook_event(session, request_id):
             return "already_processed"
         notified_amount = Decimal(str(order_data.get("amount")))
-        if notified_amount != Decimal(str(order.total_amount)):
-            raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal notifikasi DOKU tidak sesuai order")
-        payment = await PaymentRepository.get_payment_by_order(session, order.id, "doku")
-        if not payment or payment.provider != "doku":
-            raise NotFoundException("DOKU_PAYMENT_NOT_FOUND", "Payment DOKU tidak ditemukan")
+        if notified_amount != Decimal(str(payment.gross_amount)):
+            raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal notifikasi DOKU tidak sesuai bagian pembayaran")
         if status == "SUCCESS":
-            order.status = OrderStatus.PAID
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = datetime.now(timezone.utc)
-            registration = await session.get(Registration, order.registration_id)
-            if registration and registration.status != RegistrationStatus.CONFIRMED:
-                registration.status = RegistrationStatus.PAID
         elif status in {"FAILED", "CANCELLED", "CANCELED"}:
-            order.status = OrderStatus.PENDING
             payment.transaction_status = PaymentStatus.FAILED
         elif status == "EXPIRED":
-            order.status = OrderStatus.PENDING
             payment.transaction_status = PaymentStatus.EXPIRED
             payment.expired_at = datetime.now(timezone.utc)
         else:
             payment.transaction_status = status.lower()
         payment.raw_response = json.dumps(payload)
+        _, remaining, became_paid = await PaymentService._reconcile_order_payment(session, order)
         await PaymentService._notify_payment_status(session, order, payment)
         session.add(PaymentWebhookEvent(payment_id=payment.id, provider="doku", request_id=request_id, event_status=status, payload=payload))
         await session.commit()
-        if status == "SUCCESS":
+        if status == "SUCCESS" and became_paid and remaining == 0:
             asyncio.create_task(deliver_payment_for_order(order.id))
         return status.lower()

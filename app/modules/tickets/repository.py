@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException, ConflictException
 from app.modules.participants.models import ParticipantProfile
 from app.modules.payments.models import Order, OrderStatus
+from app.modules.store.models import OrderItem
 from app.modules.registrations.models import Registration
 from app.modules.registrations.repository import RegistrationRepository
 from app.modules.tickets.models import QRToken, Ticket
@@ -36,9 +37,11 @@ class TicketRepository:
             .join(Registration, Registration.id == Ticket.registration_id)
             .join(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
             .join(Order, Order.registration_id == Registration.id)
+            .join(OrderItem, OrderItem.order_id == Order.id)
             .where(
                 ParticipantProfile.user_id == user_id,
                 Order.status == OrderStatus.PAID,
+                OrderItem.product_type == "delegate",
                 Ticket.status == "issued",
             )
             .order_by(Ticket.created_at.desc())
@@ -53,10 +56,12 @@ class TicketRepository:
             .join(Registration, Registration.id == Ticket.registration_id)
             .join(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
             .join(Order, Order.registration_id == Registration.id)
+            .join(OrderItem, OrderItem.order_id == Order.id)
             .where(
                 Ticket.id == ticket_id,
                 ParticipantProfile.user_id == user_id,
                 Order.status == OrderStatus.PAID,
+                OrderItem.product_type == "delegate",
                 Ticket.status == "issued",
             )
         )
@@ -69,6 +74,18 @@ class TicketRepository:
     @staticmethod
     async def issue(session: AsyncSession, registration_id: uuid.UUID) -> Ticket:
         await RegistrationRepository.get_by_id(session, registration_id)
+        paid_order = (await session.execute(
+            select(Order.id).join(OrderItem, OrderItem.order_id == Order.id).where(
+                Order.registration_id == registration_id,
+                Order.status == OrderStatus.PAID,
+                OrderItem.product_type == "delegate",
+            ).limit(1)
+        )).scalar_one_or_none()
+        if paid_order is None:
+            raise ConflictException(
+                code="REGISTRATION_PAYMENT_REQUIRED",
+                message="Seluruh bagian pembayaran harus lunas sebelum ticket diterbitkan",
+            )
         existing = await TicketRepository.get_by_registration(session, registration_id)
         if existing:
             raise ConflictException(code="TICKET_EXISTS", message="Ticket sudah ada untuk registrasi ini")

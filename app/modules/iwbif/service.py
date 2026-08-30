@@ -33,7 +33,7 @@ class IwbifService:
             .where(
                 Order.user_id == user_id,
                 Order.registration_id.is_(None),
-                Order.status.in_([OrderStatus.PENDING, OrderStatus.PAID]),
+                Order.status.in_([OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.PAID]),
                 Product.event_id == event_id,
                 Product.product_type == "delegate",
             )
@@ -161,7 +161,7 @@ class IwbifService:
                 snapshot = order_item.metadata_json or {}
                 db.add(DelegateRegistrationPackageSelection(
                     registration_id=registration.id, delegate_package_id=selected_package.id,
-                    package_rate_id=rate.id, selection_role=selected_package.package_type,
+                    package_rate_id=rate.id, source_order_id=purchased_order.id, selection_role=selected_package.package_type,
                     occupancy_type=snapshot.get("occupancy_type", rate.occupancy_type), package_code=snapshot.get("package_code", selected_package.code),
                     package_name=snapshot.get("package_name", selected_package.name), rate_name=snapshot.get("rate_name", rate.name),
                     selected_amount=snapshot.get("display_amount", rate.amount), selected_currency=snapshot.get("display_currency", rate.currency),
@@ -242,7 +242,12 @@ class IwbifService:
     async def require_paid_order(db, registration_id):
         paid_order_id = (await db.execute(
             select(Order.id)
-            .where(Order.registration_id == registration_id, Order.status == OrderStatus.PAID)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(
+                Order.registration_id == registration_id,
+                Order.status == OrderStatus.PAID,
+                OrderItem.product_type == "delegate",
+            )
             .limit(1)
         )).scalar_one_or_none()
         if paid_order_id is None:

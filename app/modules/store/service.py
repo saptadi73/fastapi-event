@@ -5,12 +5,93 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
-from app.modules.payments.models import Order, OrderStatus
+from app.modules.payments.models import Order, OrderKind, OrderStatus
 from app.modules.store.models import Cart, CartItem, OrderItem, Product
-from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate
+from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate, DelegateRegistrationPackageSelection
+from app.modules.participants.models import ParticipantProfile
+from app.modules.registrations.models import Registration, RegistrationStatus
 
 
 class StoreService:
+    ACTIVE_ORDER_STATUSES = {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.PAID}
+
+    @staticmethod
+    async def _active_registration(db: AsyncSession, user_id, event_id, *, lock: bool = False):
+        stmt = (
+            select(Registration)
+            .join(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
+            .where(
+                ParticipantProfile.user_id == user_id,
+                Registration.event_id == event_id,
+                Registration.status.notin_([RegistrationStatus.CANCELED, RegistrationStatus.CANCELLED]),
+            )
+        )
+        if lock:
+            stmt = stmt.with_for_update()
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    async def _paid_main_order_exists(db: AsyncSession, registration_id) -> bool:
+        return bool((await db.execute(
+            select(Order.id)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(
+                Order.registration_id == registration_id,
+                Order.status == OrderStatus.PAID,
+                OrderItem.product_type == "delegate",
+            ).limit(1)
+        )).scalar_one_or_none())
+
+    @staticmethod
+    async def _additional_purchase_state(db: AsyncSession, user_id, event_id, package_id, registration=None):
+        registration = registration or await StoreService._active_registration(db, user_id, event_id)
+        if registration:
+            owned = (await db.execute(select(DelegateRegistrationPackageSelection.id).where(
+                DelegateRegistrationPackageSelection.registration_id == registration.id,
+                DelegateRegistrationPackageSelection.delegate_package_id == package_id,
+            ).limit(1))).scalar_one_or_none()
+            if owned:
+                return "owned", None, registration
+        order = (await db.execute(
+            select(Order)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .join(Product, Product.id == OrderItem.product_id)
+            .join(DelegatePackageRate, DelegatePackageRate.id == Product.delegate_package_rate_id)
+            .where(
+                Order.user_id == user_id,
+                Order.event_id == event_id,
+                Order.status.in_(StoreService.ACTIVE_ORDER_STATUSES),
+                DelegatePackageRate.delegate_package_id == package_id,
+                Product.product_type == "additional",
+            )
+            .order_by(Order.created_at.desc())
+        )).scalars().first()
+        if order:
+            state = "owned" if order.status == OrderStatus.PAID else order.status
+            return state, order, registration
+        if not registration:
+            return "registration_required", None, None
+        if not await StoreService._paid_main_order_exists(db, registration.id):
+            return "main_payment_required", None, registration
+        return "available", None, registration
+
+    @staticmethod
+    async def additional_availability(db: AsyncSession, user_id, event_id):
+        products = list((await db.execute(select(Product).where(
+            Product.event_id == event_id,
+            Product.product_type == "additional",
+            Product.is_active.is_(True),
+        ).order_by(Product.name))).scalars())
+        registration = await StoreService._active_registration(db, user_id, event_id)
+        result = []
+        for product in products:
+            rate = await db.get(DelegatePackageRate, product.delegate_package_rate_id) if product.delegate_package_rate_id else None
+            state, order, resolved_registration = await StoreService._additional_purchase_state(
+                db, user_id, event_id, rate.delegate_package_id if rate else None, registration,
+            ) if rate else ("unavailable", None, registration)
+            result.append((product, state, order, resolved_registration))
+        return result
+
     @staticmethod
     def localized_product_snapshot(product, translation):
         metadata = dict(product.metadata_json or {})
@@ -41,6 +122,13 @@ class StoreService:
                 raise ValidationException("PACKAGE_RATE_INACTIVE", "Tarif package tidak aktif")
             if payload.quantity != 1:
                 raise ValidationException("PACKAGE_QUANTITY_INVALID", "Package delegate hanya dapat dipilih satu kali")
+            if package.package_type == "additional":
+                state, existing_order, _ = await StoreService._additional_purchase_state(db, user_id, event_id, package.id)
+                # Before the initial registration exists, allow cart composition;
+                # checkout will still require exactly one main package.
+                if state not in {"available", "registration_required"}:
+                    reference = f" pada order {existing_order.order_number}" if existing_order else ""
+                    raise ConflictException("ADDITIONAL_PACKAGE_NOT_AVAILABLE", f"Additional package berstatus {state}{reference}")
             # Radio behavior for main packages and occupancy variants. Adding a
             # new rate replaces the previous selection in the same group.
             existing = (await db.execute(
@@ -100,15 +188,31 @@ class StoreService:
                     raise ValidationException("INVALID_DELEGATE_SELECTION", "Pilihan package atau tarif tidak valid")
                 selections.append((package, rate))
             mains = [(package, rate) for package, rate in selections if package.package_type == "main"]
-            if len(mains) != 1:
+            additional_only = not mains and all(package.package_type == "additional" for package, _ in selections)
+            if len(mains) != 1 and not additional_only:
                 raise ValidationException("MAIN_PACKAGE_REQUIRED", "Tepat satu Main Package wajib dipilih")
             if len({package.id for package, _ in selections}) != len(selections):
                 raise ValidationException("DUPLICATE_PACKAGE_SELECTION", "Satu package hanya boleh memiliki satu pilihan tarif")
+        else:
+            selections, mains, additional_only = [], [], False
         currencies = {product.currency for _, product in rows}
         if len(currencies) != 1:
             raise ValidationException("MIXED_CURRENCY", "Product dalam satu order harus memiliki currency yang sama")
         subtotal = sum((Decimal(str(product.price)) * item.quantity for item, product in rows), Decimal("0"))
-        order = Order(user_id=user_id, registration_id=None, event_id=event_id, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
+        registration_id = None
+        order_kind = OrderKind.MAIN_REGISTRATION if mains else OrderKind.EXHIBITOR
+        if additional_only:
+            registration = await StoreService._active_registration(db, user_id, event_id, lock=True)
+            if not registration or not await StoreService._paid_main_order_exists(db, registration.id):
+                raise ConflictException("ADDITIONAL_MAIN_PAYMENT_REQUIRED", "Main package harus lunas sebelum membeli additional package")
+            for package, _ in selections:
+                state, existing_order, _ = await StoreService._additional_purchase_state(db, user_id, event_id, package.id, registration)
+                if state != "available":
+                    reference = f" pada order {existing_order.order_number}" if existing_order else ""
+                    raise ConflictException("ADDITIONAL_PACKAGE_NOT_AVAILABLE", f"Additional package berstatus {state}{reference}")
+            registration_id = registration.id
+            order_kind = OrderKind.ADDITIONAL
+        order = Order(user_id=user_id, registration_id=registration_id, event_id=event_id, order_number=f"ORD-{uuid.uuid4().hex[:16].upper()}", order_kind=order_kind, subtotal=subtotal, discount_amount=0, tax_amount=0, service_fee=0, total_amount=subtotal, currency=currencies.pop(), status=OrderStatus.PENDING)
         db.add(order)
         await db.flush()
         from app.modules.content_translations.service import translation_map

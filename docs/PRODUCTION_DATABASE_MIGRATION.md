@@ -1,5 +1,11 @@
 # Production database migration
 
+> Untuk rilis segmented QRIS/payment, ikuti urutan produksi lengkap pada
+> `docs/SEGMENTED_QRIS_PAYMENT_IMPLEMENTATION.md`. Checkout harus dibekukan selama
+> pergantian karena backend lama menganggap satu payment sukses sebagai pelunasan
+> penuh. Revision target setelah segmented payment dan additional package order
+> adalah `202608300039`.
+
 ## Bilingual revisions
 
 Rangkaian bilingual saat ini berakhir di revision `202608290037`:

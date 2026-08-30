@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CreateDokuCheckoutRequest(BaseModel):
@@ -110,6 +110,10 @@ class DokuQrisResponse(BaseModel):
     amount: float
     currency: str
     expires_at: datetime | None = None
+    payment_sequence: int | None = None
+    payment_sequence_count: int | None = None
+    paid_amount: float = 0
+    remaining_amount: float = 0
 
 
 class CreateDirectDebitBindingRequest(BaseModel):
@@ -165,6 +169,11 @@ class DokuCheckoutResponse(BaseModel):
     payment_id: UUID | None = None
     order_status: str | None = None
     requires_payment: bool = True
+    payment_sequence: int | None = None
+    payment_sequence_count: int | None = None
+    payment_amount: float | None = None
+    paid_amount: float = 0
+    remaining_amount: float = 0
 
 
 class MidtransCheckoutResponse(DokuCheckoutResponse):
@@ -178,6 +187,7 @@ class OrderRead(BaseModel):
     registration_id: UUID | None
     event_id: UUID | None = None
     order_number: str
+    order_kind: str = "legacy"
     subtotal: float
     discount_amount: float
     tax_amount: float
@@ -191,6 +201,11 @@ class OrderRead(BaseModel):
     cancellation_reason: str | None = None
     allowed_actions: list[str] = Field(default_factory=list)
 
+    @field_validator("order_kind", mode="before")
+    @classmethod
+    def normalize_order_kind(cls, value):
+        return value or "legacy"
+
 
 class PaymentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -202,6 +217,8 @@ class PaymentRead(BaseModel):
     provider_order_id: str | None = None
     payment_type: str | None = None
     gross_amount: float
+    payment_sequence: int | None = None
+    payment_sequence_count: int | None = None
     currency: str
     transaction_status: str
     fraud_status: str | None = None
@@ -235,6 +252,9 @@ class UserOrderDetail(BaseModel):
     items: list[OrderItemRead]
     latest_payment: PaymentRead | None = None
     payment_attempts: list[PaymentRead] = Field(default_factory=list)
+    paid_amount: float = 0
+    remaining_amount: float = 0
+    is_payment_complete: bool = False
 
 
 class InvoiceRegistration(BaseModel):

@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     MIDTRANS_PAYMENT_DUE_MINUTES: int = 60
     MIDTRANS_CALLBACK_URL: str = "http://localhost:3000/payment/result"
 
+    # Organizer-approved fixed conversion and conservative QRIS split point.
+    # USD 500 * IDR 18,000 = IDR 9,000,000, below BI's IDR 10,000,000 cap.
+    PAYMENT_USD_TO_IDR_RATE: int = 18_000
+    QRIS_SEGMENT_LIMIT_IDR: int = 9_000_000
+
     # DOKU Direct API (BI-SNAP). Keys are file paths; never commit private keys.
     DOKU_SNAP_PARTNER_ID: str = ""
     DOKU_SNAP_CLIENT_SECRET: str = ""

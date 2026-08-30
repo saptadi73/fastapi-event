@@ -18,7 +18,7 @@ from app.modules.payments.midtrans import verify_pay_account_signature
 from app.modules.payments.reporting import PAYMENT_STATUSES, PaymentReportingService
 from app.core.exceptions import AppException, ValidationException
 from app.core.config import get_settings
-from app.modules.payments.models import Order, Payment, PaymentChannel, PaymentProof, PaymentWebhookCapture
+from app.modules.payments.models import Order, OrderStatus, Payment, PaymentChannel, PaymentProof, PaymentWebhookCapture
 from app.core.exceptions import NotFoundException
 from app.modules.email_notifications.service import deliver_payment_for_order
 
@@ -490,7 +490,7 @@ async def admin_update_transaction_status(
     db: AsyncSession = Depends(get_db_session),
 ):
     order, payment = await PaymentService.update_transaction_status(db, payment_id, payload, organizer.id)
-    if payment.transaction_status == "success":
+    if payment.transaction_status == "success" and order.status == OrderStatus.PAID:
         background_tasks.add_task(deliver_payment_for_order, order.id)
     return success_response(
         "Status transaksi pembayaran berhasil diperbarui",
@@ -530,7 +530,8 @@ async def admin_bulk_transaction_action(
     results = await PaymentService.bulk_transaction_action(db, payload, organizer.id)
     if payload.action in {"paid", "success"}:
         for order, _ in results:
-            background_tasks.add_task(deliver_payment_for_order, order.id)
+            if order.status == OrderStatus.PAID:
+                background_tasks.add_task(deliver_payment_for_order, order.id)
     return success_response(
         "Bulk action transaksi pembayaran berhasil",
         data={

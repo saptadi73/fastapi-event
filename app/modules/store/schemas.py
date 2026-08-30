@@ -22,6 +22,14 @@ class ProductRead(ProductWrite):
     event_id: UUID
 
 
+class AdditionalProductAvailability(ProductRead):
+    purchase_status: str
+    is_purchasable: bool
+    existing_order_id: UUID | None = None
+    registration_id: UUID | None = None
+    reason: str | None = None
+
+
 class CartItemWrite(BaseModel):
     product_id: UUID
     quantity: int = Field(ge=1, le=99)
@@ -55,4 +63,4 @@ class CheckoutRead(BaseModel):
     status: str
     item_count: int
     created_at: datetime
-
+    order_kind: str = "legacy"

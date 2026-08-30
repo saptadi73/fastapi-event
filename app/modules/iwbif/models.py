@@ -147,6 +147,7 @@ class DelegateRegistrationPackageSelection(Base):
     registration_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("registrations.id", ondelete="CASCADE"), nullable=False)
     delegate_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_packages.id"), nullable=False)
     package_rate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("delegate_package_rates.id"), nullable=False)
+    source_order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True)
     selection_role: Mapped[str] = mapped_column(String(20), nullable=False)
     occupancy_type: Mapped[str] = mapped_column(String(20), nullable=False)
     package_code: Mapped[str] = mapped_column(String(30), nullable=False)

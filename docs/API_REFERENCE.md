@@ -617,11 +617,19 @@ total.
 
 ```http
 GET /api/v1/store/events/{event_id}/products
+GET /api/v1/store/events/{event_id}/additional-products/me
 GET /api/v1/store/events/{event_id}/cart
 POST /api/v1/store/events/{event_id}/cart/items
 DELETE /api/v1/store/events/{event_id}/cart/items/{product_id}
 POST /api/v1/store/events/{event_id}/checkout
 ```
+
+Endpoint `additional-products/me` adalah katalog personalized untuk pembelian
+add-on setelah registrasi. Response menambahkan `purchase_status`,
+`is_purchasable`, `existing_order_id`, `registration_id`, dan `reason`.
+`available` dapat dibeli; `pending`/`partially_paid` harus dilanjutkan dari order
+yang ada; `owned` tidak boleh dibeli ulang; `registration_required` atau
+`main_payment_required` berarti prasyarat belum terpenuhi.
 
 Payload add item:
 
@@ -643,8 +651,11 @@ POST /api/v1/payments/midtrans/checkout
 {"order_id":"order-uuid"}
 ```
 
-Checkout cart tidak memerlukan registration. Order baru selalu menyimpan
+Checkout cart awal tidak memerlukan registration. Order baru selalu menyimpan
 `user_id`; `registration_id` dapat kosong sampai form Delegate selesai dibuat.
+Checkout additional-only setelah main lunas membuat order terpisah dengan
+`order_kind=additional` dan langsung memakai `registration_id` lama. Backend
+memeriksa selection dan order aktif agar additional yang sama tidak dibeli ulang.
 Untuk product `delegate`, metadata berisi:
 
 ```json
@@ -1108,9 +1119,15 @@ Response memiliki pagination `page`, `size`, `total`, `pages`. Setiap item:
   "latest_payment": {
     "id": "payment-uuid",
     "provider": "midtrans",
+    "payment_sequence": 1,
+    "payment_sequence_count": 2,
+    "gross_amount": 9000000,
     "transaction_status": "expired"
   },
-  "payment_attempts": []
+  "payment_attempts": [],
+  "paid_amount": 9000000,
+  "remaining_amount": 7500000,
+  "is_payment_complete": false
 }
 ```
 
@@ -1124,8 +1141,10 @@ POST /api/v1/orders/{order_id}/continue-payment
 
 Nilai provider adalah `doku` atau `midtrans`. Attempt aktif yang belum expired
 dapat menggunakan URL/token lama; attempt gagal/expired tetap tersimpan dan
-attempt baru dibuat pada order yang sama. Webhook gagal/expired tidak lagi
-membatalkan order, sehingga order tetap `pending` dan payable.
+attempt baru dibuat pada order yang sama dan sequence sukses tidak diulang.
+Webhook gagal/expired tidak lagi membatalkan order, sehingga order tetap
+`pending` atau `partially_paid` dan payable. Simpan `order_id` sebagai resume key;
+jangan menyimpan gateway token sebagai identitas transaksi utama.
 
 `DELETE /api/v1/orders/{order_id}` melakukan soft-cancel terhadap order belum
 lunas serta attempt `created/pending`. Payload body opsional:
@@ -1136,9 +1155,31 @@ dengan `409 PAID_ORDER_CANCEL_FORBIDDEN`. Soft-canceled order memiliki
 
 Payment fields: IDs/provider references, `payment_type`, `gross_amount`,
 `currency`, `transaction_status`, `paid_at`, `channel_code`,
-`virtual_account_no`, `payment_instructions_url`. Order status: `draft`,
-`pending`, `paid`, `expired`, `canceled`. Payment status: `created`, `pending`,
+`virtual_account_no`, `payment_instructions_url`, `payment_sequence`, dan
+`payment_sequence_count`. Order detail juga menyediakan `paid_amount`,
+`remaining_amount`, dan `is_payment_complete`. Order status: `draft`,
+`pending`, `partially_paid`, `paid`, `expired`, `canceled`. Payment status: `created`, `pending`,
 `success`, `failed`, `expired`, `refunded`, `canceled`.
+
+Frontend hanya menganggap pembayaran selesai jika parent order `paid` atau
+`is_payment_complete=true`. Child payment `success` dapat berarti baru satu
+bagian. Selama `partially_paid`, ticket dan proses registrasi lanjutan harus
+disembunyikan dan pengguna diarahkan ke `continue-payment`.
+
+Jika provider sudah sukses tetapi webhook hilang, organizer memverifikasi ID dan
+nominal di portal provider lalu memakai:
+
+```http
+PATCH /api/v1/admin/transactions/{payment_id}/status
+```
+
+```json
+{"status":"success","paid_at":"2026-08-30T14:30:00+07:00","notes":"Verified in provider portal; webhook missing"}
+```
+
+Endpoint tersebut hanya mengonfirmasi payment part terkait dan menyimpan audit
+event. Jangan memakai `confirm-manual-payment` untuk rekonsiliasi Midtrans/DOKU;
+endpoint itu khusus pembayaran manual penuh.
 
 Server-to-server; **jangan dipanggil frontend**:
 

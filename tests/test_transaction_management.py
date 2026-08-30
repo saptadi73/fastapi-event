@@ -80,7 +80,7 @@ class TransactionManagementTests(unittest.IsolatedAsyncioTestCase):
             return {Payment: payment, Order: order, Registration: registration}.get(model)
 
         session.get.side_effect = get
-        with patch.object(PaymentService, "_notify_payment_status", AsyncMock()):
+        with patch.object(PaymentService, "_notify_payment_status", AsyncMock()), patch.object(PaymentService, "_payment_progress", AsyncMock(return_value=(100, 0))):
             returned_order, returned_payment = await PaymentService.update_transaction_status(
                 session, payment_id, TransactionStatusUpdateRequest(status="paid"), uuid.uuid4()
             )

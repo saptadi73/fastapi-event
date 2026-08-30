@@ -27,6 +27,28 @@ async def products(event_id: UUID, request: Request, db: AsyncSession = Depends(
     return success_response("Product ditemukan", data, request=request)
 
 
+@router.get("/events/{event_id}/additional-products/me")
+async def my_additional_products(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    rows = await StoreService.additional_availability(db, user.id, event_id)
+    translations = await translation_map(db, "product", [product.id for product, _, _, _ in rows], request_locale(request))
+    data = []
+    for product, state, order, registration in rows:
+        values = schemas.ProductRead.model_validate(product).model_dump()
+        translation = translations.get(product.id)
+        if translation:
+            values["name"] = translation.fields.get("name", values["name"])
+            values["description"] = translation.fields.get("description", values["description"])
+        data.append(schemas.AdditionalProductAvailability(
+            **values,
+            purchase_status=state,
+            is_purchasable=state == "available",
+            existing_order_id=order.id if order else None,
+            registration_id=registration.id if registration else None,
+            reason=None if state == "available" else state,
+        ))
+    return success_response("Status additional package ditemukan", data=data, request=request)
+
+
 @router.post("/admin/events/{event_id}/products", status_code=201)
 async def create_product(event_id: UUID, payload: schemas.ProductWrite, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
     row = Product(event_id=event_id, **payload.model_dump())
@@ -89,4 +111,4 @@ async def checkout(event_id: UUID, request: Request, background_tasks: Backgroun
     items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id, OrderItem.product_type == "exhibitor"))).scalars().all()
     for item in items:
         background_tasks.add_task(deliver_to_user, event_id, "exhibitor_package_selected", user.id, {"event_name": event.name, "package_name": item.product_name, "package_code": item.product_code, "amount": item.line_total, "currency": item.currency, "_product_id": item.product_id}, "order", order.id)
-    return success_response("Order berhasil dibuat dan menunggu pembayaran", schemas.CheckoutRead(order_id=order.id, order_number=order.order_number, total_amount=float(order.total_amount), currency=order.currency, status=order.status, item_count=item_count, created_at=order.created_at), request=request)
+    return success_response("Order berhasil dibuat dan menunggu pembayaran", schemas.CheckoutRead(order_id=order.id, order_number=order.order_number, total_amount=float(order.total_amount), currency=order.currency, status=order.status, item_count=item_count, created_at=order.created_at, order_kind=order.order_kind), request=request)
