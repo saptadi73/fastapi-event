@@ -63,7 +63,22 @@ additional-only initial checkout is rejected.
 - Partial add-on payment changes only its order to `partially_paid`.
 - It does not downgrade the main registration from `paid` or `confirmed`.
 - Complete settlement idempotently inserts a package selection with
-  `source_order_id`.
+  `source_order_id`.Pengembangan pembelian additional package setelah registrasi utama sudah selesai.
+  
+  Perilaku baru:
+  
+  Main order yang sudah dibayar tidak diubah.
+  Pembelian additional membuat order baru dengan order_kind=additional.
+  Order additional tetap terhubung ke registration_id yang sama.
+  Pembayaran additional menggunakan mekanisme Midtrans/DOKU, split, partial, resume, dan rekonsiliasi yang sama.
+  Additional baru menjadi milik peserta setelah seluruh pembayaran order tersebut lengkap.
+  Pemeriksaan pembelian sebelumnya dilakukan berlapis:
+  
+  Saat menampilkan katalog personal.
+  Saat additional dimasukkan ke cart.
+  Saat checkout dengan registration row lock.
+  Saat aktivasi setelah pembayaran.
+  Unique constraint database pada (registration_id, delegate_package_id).
 - Duplicate/retried webhooks cannot create the entitlement twice.
 - Add-on payment never substitutes for main payment. Ticket and core registration
   gates require a paid order item of type `delegate`.
