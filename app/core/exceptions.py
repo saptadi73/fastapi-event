@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class AppException(Exception):
     code: str
     message: str
+    field: str = ""
 
 
 class NotFoundException(AppException):
@@ -17,4 +18,3 @@ class ValidationException(AppException):
 
 class ConflictException(AppException):
     pass
-

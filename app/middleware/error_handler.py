@@ -45,7 +45,7 @@ def add_exception_handlers(app: FastAPI) -> None:
             status_code=status_code,
             content=fail_response(
                 message=exc.message,
-                errors=[{"field": "", "code": exc.code, "message": exc.message}],
+                errors=[{"field": exc.field, "code": exc.code, "message": exc.message}],
                 request=request,
             ),
         )

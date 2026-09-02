@@ -12,7 +12,7 @@ class UserRepository:
         stmt = select(User).where(User.email == email.lower())
         result = await session.execute(stmt)
         if result.scalar_one_or_none():
-            raise ConflictException(code="USER_EXISTS", message="Email sudah terdaftar")
+            raise ConflictException(code="USER_EXISTS", message="Email sudah terdaftar", field="email")
 
         user = User(email=email.lower(), password_hash=password_hash, country=country, phone=phone, preferred_locale=preferred_locale)
         session.add(user)
