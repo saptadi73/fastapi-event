@@ -2,6 +2,7 @@ import asyncio
 import logging
 import smtplib
 from email.message import EmailMessage
+from urllib.parse import urlencode
 
 from app.core.config import get_settings
 
@@ -59,3 +60,47 @@ async def send_registration_confirmation(email: str) -> None:
         )
     except Exception:
         logger.exception("Failed to send registration email; recipient=%s", email)
+
+
+def password_reset_url(token: str) -> str:
+    settings = get_settings()
+    separator = "&" if "?" in settings.FRONTEND_RESET_PASSWORD_URL else "?"
+    return f"{settings.FRONTEND_RESET_PASSWORD_URL}{separator}{urlencode({'token': token})}"
+
+
+async def send_password_reset_email(email: str, token: str) -> bool:
+    settings = get_settings()
+    if not settings.EMAIL_ENABLED:
+        logger.info("Password reset email disabled; recipient=%s", email)
+        return False
+    if not settings.EMAIL_SMTP_PASSWORD:
+        logger.error("Password reset email skipped: EMAIL_SMTP_PASSWORD is empty")
+        return False
+
+    reset_url = password_reset_url(token)
+    message = EmailMessage()
+    message["Subject"] = "Reset your IWBIF password"
+    message["From"] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
+    message["To"] = email
+    message.set_content(
+        "We received a request to reset your IWBIF account password.\n\n"
+        f"Open this link to choose a new password:\n{reset_url}\n\n"
+        f"This link expires in {settings.PASSWORD_RESET_EXPIRE_MINUTES} minutes and can only be used once.\n"
+        "If you did not request this reset, you can ignore this email.\n\n"
+        "Best regards,\nThe IWBIF Team"
+    )
+    try:
+        await asyncio.to_thread(
+            _send_message,
+            message,
+            settings.EMAIL_SMTP_HOST,
+            settings.EMAIL_SMTP_PORT,
+            settings.EMAIL_SMTP_USERNAME,
+            settings.EMAIL_SMTP_PASSWORD,
+            settings.EMAIL_SMTP_USE_SSL,
+            settings.EMAIL_SMTP_USE_TLS,
+        )
+        return True
+    except Exception:
+        logger.exception("Failed to send password reset email; recipient=%s", email)
+        return False

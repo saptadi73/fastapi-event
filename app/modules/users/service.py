@@ -1,5 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 
 from app.core.exceptions import ValidationException
 from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
@@ -202,32 +205,67 @@ class UserService:
         return None
 
     @staticmethod
-    async def forgot_password(db: AsyncSession, email: str) -> str:
+    async def forgot_password(db: AsyncSession, email: str) -> tuple[str, str] | None:
+        from app.core.config import get_settings
+        from app.modules.users.models import PasswordResetToken
+
         user = await UserRepository.get_by_email(db, email)
         if not user:
             # Tetap gunakan pesan yang sama untuk menghindari kebocoran akun.
-            return create_access_token("unknown", extra={"type": "forgot_password", "email": email.lower()})
-        reset_token = create_access_token(str(user.id), extra={"type": "forgot_password"})
-        return reset_token
+            return None
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
+        reset_token = secrets.token_urlsafe(32)
+        db.add(PasswordResetToken(
+            user_id=user.id,
+            token_hash=hashlib.sha256(reset_token.encode("utf-8")).hexdigest(),
+            expires_at=now + timedelta(minutes=get_settings().PASSWORD_RESET_EXPIRE_MINUTES),
+        ))
+        await db.commit()
+        return user.email, reset_token
 
     @staticmethod
     async def reset_password(db: AsyncSession, token: str, password: str, confirm_password: str) -> bool:
+        from app.modules.users.models import PasswordResetToken
+
         if password != confirm_password:
             raise ValidationException(code="PASSWORD_MISMATCH", message="Konfirmasi password tidak cocok")
         try:
-            from app.core.security import decode_token
-
-            payload = decode_token(token)
-            if payload.get("type") != "forgot_password":
+            now = datetime.now(timezone.utc)
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            reset_token = (await db.execute(
+                select(PasswordResetToken)
+                .where(PasswordResetToken.token_hash == token_hash)
+                .with_for_update()
+            )).scalar_one_or_none()
+            if not reset_token or reset_token.used_at is not None:
                 raise ValidationException(code="INVALID_TOKEN", message="Token tidak valid")
-            user_id = payload.get("sub")
-            if not user_id:
-                raise ValidationException(code="INVALID_TOKEN", message="Token tidak valid")
-            user = await UserRepository.get_by_id(db, user_id)
+            expires_at = reset_token.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= now:
+                raise ValidationException(code="EXPIRED_TOKEN", message="Token reset password sudah kedaluwarsa")
+            user = await UserRepository.get_by_id(db, reset_token.user_id)
             if not user:
                 raise ValidationException(code="INVALID_TOKEN", message="Token tidak valid")
-            password_hash = hash_password(password)
-            await UserRepository.update_password(session=db, user=user, password_hash=password_hash)
+            user.password_hash = hash_password(password)
+            reset_token.used_at = now
+            await db.execute(
+                update(PasswordResetToken)
+                .where(
+                    PasswordResetToken.user_id == user.id,
+                    PasswordResetToken.used_at.is_(None),
+                )
+                .values(used_at=now)
+            )
+            await db.commit()
             return True
         except ValidationException:
             raise

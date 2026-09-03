@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = "event@iwbif.id"
     EMAIL_FROM_NAME: str = "IWBIF 2026"
     FRONTEND_LOGIN_URL: str = "http://localhost:3000/login"
+    FRONTEND_RESET_PASSWORD_URL: str = "http://localhost:3000/reset-password"
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 30
 
     DOKU_CLIENT_ID: str = ""
     DOKU_SECRET_KEY: str = ""

@@ -119,12 +119,18 @@ async def logout(request: Request):
 async def forgot_password(
     request: Request,
     payload: schemas.ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
-    token = await UserService.forgot_password(db, payload.email)
+    delivery = await UserService.forgot_password(db, payload.email)
+    if delivery:
+        from app.core.email import send_password_reset_email
+
+        email, token = delivery
+        background_tasks.add_task(send_password_reset_email, email, token)
     return success_response(
-        "Instruksi reset password telah dikirim",
-        data={"email": payload.email, "reset_token": token},
+        "Jika email terdaftar, instruksi reset password akan dikirim",
+        data={"requested": True},
         request=request,
     )
 
@@ -136,7 +142,7 @@ async def reset_password(
     db: AsyncSession = Depends(get_db_session),
 ):
     await UserService.reset_password(db, payload.token, payload.password, payload.confirm_password)
-    return success_response("Password berhasil diubah", data={"token": payload.token}, request=request)
+    return success_response("Password berhasil diubah", data={"changed": True}, request=request)
 
 
 @router.post("/verify-email", summary="Verify email")

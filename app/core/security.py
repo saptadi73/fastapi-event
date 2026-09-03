@@ -104,9 +104,20 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    if _pwd_context is not None:
+    # Fallback hashes may be created in an environment where passlib/bcrypt is
+    # unavailable (for example a maintenance CLI). They must remain verifiable
+    # after the database is read by a production process that does have
+    # passlib installed.
+    if hashed_password.startswith("fallback$"):
+        return _fallback_verify_password(plain_password, hashed_password)
+    if _pwd_context is None:
+        return False
+    try:
         return _pwd_context.verify(plain_password, hashed_password)
-    return _fallback_verify_password(plain_password, hashed_password)
+    except (TypeError, ValueError):
+        # Treat unsupported/corrupt hashes as invalid credentials instead of
+        # leaking an internal server error from the login endpoint.
+        return False
 
 
 def _to_timestamp(value: datetime) -> int:
@@ -157,4 +168,3 @@ def decode_token(token: str) -> dict[str, Any]:
         except JoseJWTError as exc:
             raise TokenDecodeError("Invalid token") from exc
     return _fallback_decode(token, settings)
-
