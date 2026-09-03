@@ -33,8 +33,10 @@ class Settings(BaseSettings):
     EMAIL_SMTP_PASSWORD: str = ""
     EMAIL_FROM_ADDRESS: str = "event@iwbif.id"
     EMAIL_FROM_NAME: str = "IWBIF 2026"
-    FRONTEND_LOGIN_URL: str = "http://localhost:3000/login"
-    FRONTEND_RESET_PASSWORD_URL: str = "http://localhost:3000/reset-password"
+    # Optional explicit routes. When omitted, email links are derived from
+    # FRONTEND_URL so production cannot silently fall back to localhost.
+    FRONTEND_LOGIN_URL: str = ""
+    FRONTEND_RESET_PASSWORD_URL: str = ""
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
 
     DOKU_CLIENT_ID: str = ""

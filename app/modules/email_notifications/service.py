@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionFactory
-from app.core.email import _send_message
+from app.core.email import _send_message, frontend_login_url
 from app.core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale
 from app.modules.email_notifications.models import EmailNotificationLog, EmailNotificationPreference, EmailNotificationTemplate
 from app.modules.users.models import User
@@ -188,7 +188,7 @@ async def deliver_to_user(event_id: UUID, trigger: str, user_id: UUID, variables
         logger.info("Email notification disabled for account; trigger=%s user_id=%s", trigger, user_id)
         return False
     values = apply_content_translations(
-        {"participant_name": user.full_name or user.email, "login_url": get_settings().FRONTEND_LOGIN_URL, **localized_variables},
+        {"participant_name": user.full_name or user.email, "login_url": frontend_login_url(), **localized_variables},
         event_translation=event_translation,
         product_translation=product_translation,
         package_translation=package_translation,

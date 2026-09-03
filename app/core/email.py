@@ -37,7 +37,7 @@ async def send_registration_confirmation(email: str) -> None:
         logger.error("Registration email skipped: EMAIL_SMTP_PASSWORD is empty")
         return
 
-    login_url = settings.FRONTEND_LOGIN_URL
+    login_url = frontend_login_url()
     message = EmailMessage()
     message["Subject"] = "Registrasi IWBIF 2026 berhasil"
     message["From"] = f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM_ADDRESS}>"
@@ -62,10 +62,24 @@ async def send_registration_confirmation(email: str) -> None:
         logger.exception("Failed to send registration email; recipient=%s", email)
 
 
+def _frontend_route(configured_url: str, path: str) -> str:
+    settings = get_settings()
+    configured_url = configured_url.strip()
+    if configured_url:
+        return configured_url
+    return f"{settings.FRONTEND_URL.rstrip('/')}{path}"
+
+
+def frontend_login_url() -> str:
+    settings = get_settings()
+    return _frontend_route(settings.FRONTEND_LOGIN_URL, "/auth/login")
+
+
 def password_reset_url(token: str) -> str:
     settings = get_settings()
-    separator = "&" if "?" in settings.FRONTEND_RESET_PASSWORD_URL else "?"
-    return f"{settings.FRONTEND_RESET_PASSWORD_URL}{separator}{urlencode({'token': token})}"
+    reset_url = _frontend_route(settings.FRONTEND_RESET_PASSWORD_URL, "/auth/reset-password")
+    separator = "&" if "?" in reset_url else "?"
+    return f"{reset_url}{separator}{urlencode({'token': token})}"
 
 
 async def send_password_reset_email(email: str, token: str) -> bool:

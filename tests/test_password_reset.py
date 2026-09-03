@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from app.core.email import password_reset_url
+from app.core.email import frontend_login_url, password_reset_url
 from app.core.exceptions import ValidationException
 from app.modules.users.models import PasswordResetToken
 from app.modules.users.service import UserService
@@ -13,6 +13,19 @@ from app.modules.users.service import UserService
 class PasswordResetUrlTests(unittest.TestCase):
     def test_frontend_reset_url_contains_encoded_token(self):
         self.assertIn("token=abc%2B%2F%3D", password_reset_url("abc+/="))
+
+    def test_email_routes_fall_back_to_frontend_url(self):
+        settings = SimpleNamespace(
+            FRONTEND_URL="https://iwbif.id/",
+            FRONTEND_LOGIN_URL="",
+            FRONTEND_RESET_PASSWORD_URL="",
+        )
+        with patch("app.core.email.get_settings", return_value=settings):
+            self.assertEqual("https://iwbif.id/auth/login", frontend_login_url())
+            self.assertEqual(
+                "https://iwbif.id/auth/reset-password?token=token",
+                password_reset_url("token"),
+            )
 
 
 class PasswordResetServiceTests(unittest.IsolatedAsyncioTestCase):
