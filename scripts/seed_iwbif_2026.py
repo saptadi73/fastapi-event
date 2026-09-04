@@ -25,6 +25,7 @@ from app.modules.business_matching.models import (
     ParticipantBlock, ParticipantReport,
 )
 from app.modules.check_ins.models import CheckIn
+from app.modules.content_translations.models import ContentTranslation
 from app.modules.events.models import Event, EventStatus
 from app.modules.email_notifications.models import EmailNotificationTemplate
 from app.modules.email_notifications.service import DEFAULT_TEMPLATES_BY_LOCALE, TRIGGER_VARIABLES
@@ -180,6 +181,25 @@ async def seed():
                 payable_currency = "IDR" if rate.payment_amount_idr is not None else rate.currency
                 product_type = "delegate" if delegate_package.package_type == "main" else delegate_package.package_type
                 await ensure(db, Product, delegate_package_rate_id=rate.id, defaults=dict(event_id=event.id, code=f"{delegate_package.package_type.upper()}_{code}_{occupancy.upper()}", name=f"{delegate_package.name} - {rate_name}", description=delegate_package.description, product_type=product_type, price=payable_amount, currency=payable_currency, max_quantity=1, metadata_json={"delegate_package_id": str(delegate_package.id), "delegate_package_rate_id": str(rate.id), "package_type": delegate_package.package_type, "package_code": delegate_package.code, "package_name": delegate_package.name, "rate_name": rate_name, "occupancy_type": occupancy, "display_amount": str(amount), "display_currency": "USD"}, is_active=True))
+
+        package_zh = {
+            "EXHIBITOR": {"name": "参展商套餐 - 200美元", "description": "无需注册成为代表即可获得参展商权限"},
+            "HOST": {"name": "主办方套餐", "description": "主办方专属活动权限"},
+            "HOST_PACKAGE": {"name": "主办方套餐", "description": "主办方专属活动权限"},
+        }
+        rate_zh = {"EXHIBITOR": "参展商通行证", "HOST": "主办方通行证", "HOST_PACKAGE": "主办方通行证"}
+        for code, fields in package_zh.items():
+            package = packages_by_code.get(code) or await one(db, DelegatePackage, event_id=event.id, code=code)
+            if package is None:
+                continue
+            await ensure(db, ContentTranslation, entity_type="delegate_package", entity_id=package.id, locale="zh-CN", defaults={"fields": fields})
+            translated_rates = list((await db.execute(select(DelegatePackageRate).where(DelegatePackageRate.delegate_package_id == package.id))).scalars())
+            for rate in translated_rates:
+                translated_rate_name = rate_zh[code]
+                await ensure(db, ContentTranslation, entity_type="delegate_package_rate", entity_id=rate.id, locale="zh-CN", defaults={"fields": {"name": translated_rate_name}})
+                product = await one(db, Product, delegate_package_rate_id=rate.id)
+                if product:
+                    await ensure(db, ContentTranslation, entity_type="product", entity_id=product.id, locale="zh-CN", defaults={"fields": {"name": f"{fields['name']} - {translated_rate_name}", "description": fields["description"]}})
         facilities = {
             "A": ["3 Nights Accommodation at 5 star hotel Jakarta", "Airport Transfers", "Local Transportation", "Conference Access & Pass to TEI - Trade Expo Indonesia", "2 lunches & 2 coffee breaks", "Welcome Dinner at PIK2", "Welcome Dinner hosted by Governor of DKI Jakarta", "Jakarta City Tour"],
             "B": ["3 Nights Accommodation at 3/5 star hotel Jakarta", "Airport Transfers", "Local Transportation", "Conference Access & Pass to TEI - Trade Expo Indonesia", "2 lunches & 2 coffee breaks", "Welcome Dinner at PIK2", "Welcome Dinner hosted by Governor of DKI Jakarta", "Jakarta City Tour"],

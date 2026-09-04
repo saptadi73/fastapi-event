@@ -551,6 +551,10 @@ Aturan checkout package:
   menggunakan occupancy `standard`.
 - Menambahkan rate lain pada package yang sama otomatis mengganti pilihan lama.
 
+Katalog `?locale=zh-CN` menyediakan translasi package, rate, dan product untuk
+Exhibitor (`参展商套餐`, `参展商通行证`) serta Host (`主办方套餐`, `主办方通行证`).
+Translasi Host diterapkan untuk kode master `HOST` maupun `HOST_PACKAGE`.
+
 ## 4. Participant profile
 
 Participant profile bukan bagian dari registrasi akun awal. Resource ini dipakai
