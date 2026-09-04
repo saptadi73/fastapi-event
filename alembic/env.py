@@ -18,6 +18,7 @@ from app.modules.business_matching import models as business_matching_models
 from app.modules.email_notifications import models as email_notification_models
 from app.modules.iwbif import models as iwbif_models
 from app.modules.admin_content import models as admin_content_models
+from app.modules.committee import models as committee_models
 
 config = context.config
 fileConfig(config.config_file_name)

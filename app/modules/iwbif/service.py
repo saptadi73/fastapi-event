@@ -25,6 +25,26 @@ MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
 
 class IwbifService:
     @staticmethod
+    async def require_purchased_exhibitor_package(db, event_id, user_id):
+        order_id = (await db.execute(
+            select(Order.id)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(
+                Order.user_id == user_id,
+                Order.event_id == event_id,
+                Order.status.in_([OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.PAID]),
+                OrderItem.product_type == "exhibitor",
+            )
+            .limit(1)
+        )).scalar_one_or_none()
+        if order_id is None:
+            raise ValidationException(
+                "EXHIBITOR_PACKAGE_REQUIRED",
+                "Package Exhibitor harus dipilih sebelum mengisi registrasi exhibitor",
+            )
+        return order_id
+
+    @staticmethod
     async def resolve_purchased_delegate_package(db, event_id, user_id, requested_package_id=None):
         rows = (await db.execute(
             select(Order, Product)
@@ -255,8 +275,9 @@ class IwbifService:
 
     @staticmethod
     async def create_exhibitor(db, event_id, user_id, payload):
-        participant = await IwbifService.resolve_participant(db, user_id, payload.participant_id, full_name=payload.contact_person, organization_name=payload.company_name)
         if not await db.get(Event, event_id): raise NotFoundException("EVENT_NOT_FOUND", "Event tidak ditemukan")
+        await IwbifService.require_purchased_exhibitor_package(db, event_id, user_id)
+        participant = await IwbifService.resolve_participant(db, user_id, payload.participant_id, full_name=payload.contact_person, organization_name=payload.company_name)
         existing = (await db.execute(select(ExhibitorRegistration.id).where(ExhibitorRegistration.event_id == event_id, ExhibitorRegistration.participant_id == participant.id))).first()
         if existing: raise ConflictException("EXHIBITOR_EXISTS", "User sudah memiliki registrasi exhibitor untuk event ini")
         company = await IwbifService.upsert_company(db, participant.id, name=payload.company_name, country=await IwbifService.account_country(db, user_id))

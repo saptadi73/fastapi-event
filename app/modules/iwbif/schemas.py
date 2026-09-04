@@ -88,7 +88,7 @@ class SlotRead(BaseModel):
 class PackageWrite(BaseModel):
     code: str = Field(min_length=1, max_length=30)
     name: str = Field(min_length=1, max_length=160)
-    package_type: str = Field(default="main", pattern="^(main|additional)$")
+    package_type: str = Field(default="main", pattern="^(main|additional|exhibitor)$")
     selection_mode: str = Field(default="required_one", pattern="^(required_one|optional)$")
     description: str | None = Field(default=None, max_length=3000)
     display_order: int = Field(default=0, ge=0)
@@ -106,7 +106,7 @@ class PackageWrite(BaseModel):
 
 
 class PackageRateWrite(BaseModel):
-    occupancy_type: str = Field(pattern="^(sharing|single)$")
+    occupancy_type: str = Field(pattern="^(sharing|single|standard)$")
     name: str = Field(min_length=1, max_length=120)
     amount: float = Field(gt=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
@@ -165,6 +165,7 @@ class PackageCatalogItem(PackageRead):
 class PackageCatalogRead(BaseModel):
     main_packages: list[PackageCatalogItem]
     additional_packages: list[PackageCatalogItem]
+    exhibitor_packages: list[PackageCatalogItem] = Field(default_factory=list)
 
 class ActivityWrite(BaseModel):
     name: str = Field(min_length=1, max_length=160)

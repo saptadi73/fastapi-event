@@ -189,12 +189,13 @@ class StoreService:
                 selections.append((package, rate))
             mains = [(package, rate) for package, rate in selections if package.package_type == "main"]
             additional_only = not mains and all(package.package_type == "additional" for package, _ in selections)
-            if len(mains) != 1 and not additional_only:
+            exhibitor_only = not mains and all(package.package_type == "exhibitor" for package, _ in selections)
+            if len(mains) != 1 and not additional_only and not exhibitor_only:
                 raise ValidationException("MAIN_PACKAGE_REQUIRED", "Tepat satu Main Package wajib dipilih")
             if len({package.id for package, _ in selections}) != len(selections):
                 raise ValidationException("DUPLICATE_PACKAGE_SELECTION", "Satu package hanya boleh memiliki satu pilihan tarif")
         else:
-            selections, mains, additional_only = [], [], False
+            selections, mains, additional_only, exhibitor_only = [], [], False, False
         currencies = {product.currency for _, product in rows}
         if len(currencies) != 1:
             raise ValidationException("MIXED_CURRENCY", "Product dalam satu order harus memiliki currency yang sama")

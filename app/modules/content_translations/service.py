@@ -23,6 +23,7 @@ TRANSLATABLE_FIELDS: dict[str, frozenset[str]] = {
     "business_matching_slot": frozenset({"label"}),
     "session": frozenset({"title", "description", "session_type", "room_name"}),
     "speaker": frozenset({"professional_title", "organization_name", "biography", "expertise_tags", "session_title"}),
+    "committee_member": frozenset({"role_title", "committee_group", "organization_name", "biography"}),
     "announcement": frozenset({"title", "body"}),
     "certificate": frozenset({"title"}),
     "matching_session": frozenset({"name"}),
@@ -53,6 +54,9 @@ def _model_for(entity_type: str):
     if entity_type == "speaker":
         from app.modules.speakers.models import Speaker
         return Speaker
+    if entity_type == "committee_member":
+        from app.modules.committee.models import CommitteeMember
+        return CommitteeMember
     if entity_type in {"announcement", "certificate"}:
         from app.modules.admin_content import models
         return {"announcement": models.Announcement, "certificate": models.Certificate}[entity_type]

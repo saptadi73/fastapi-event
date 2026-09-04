@@ -2511,6 +2511,69 @@ Checklist:
 - Upload/download memakai multipart/blob.
 - WebSocket tidak menggantikan REST; sync history setelah reconnect.
 
+### Committee / host
+
+Committee dikelola per event dan diurutkan berdasarkan `display_order`. Endpoint
+publik hanya mengembalikan anggota berstatus `published` dan mendukung
+`?locale=en|zh-CN`:
+
+```http
+GET /api/v1/events/{event_id}/committee
+```
+
+Endpoint organizer/admin:
+
+```http
+GET    /api/v1/admin/committee?event_id={event_id}
+POST   /api/v1/admin/committee
+PUT    /api/v1/admin/committee/{member_id}
+POST   /api/v1/admin/committee/{member_id}/photo
+DELETE /api/v1/admin/committee/{member_id}
+```
+
+Field sumber: `event_id`, `full_name`, `role_title`, `committee_group`,
+`organization_name`, `biography`, `profile_photo_url`, `display_order`,
+`is_featured`, dan `status` (`draft`, `published`, atau `archived`). Nama orang,
+foto, urutan, featured, dan status bersifat canonical. Terjemahan Simplified
+Chinese disimpan melalui mekanisme content translation:
+
+```http
+PUT /api/v1/admin/content-translations/committee_member/{member_id}/zh-CN
+
+{"fields":{"role_title":"委员会主席","committee_group":"组委会","organization_name":"机构名称","biography":"中文简介"}}
+```
+
+Upload foto dilakukan setelah member berhasil dibuat karena endpoint memerlukan
+`member_id`. Gunakan `multipart/form-data` dengan field file bernama `file`:
+
+```http
+POST /api/v1/admin/committee/{member_id}/photo
+Authorization: Bearer <admin_access_token>
+Content-Type: multipart/form-data
+
+file=<binary JPG, PNG, atau WebP>
+```
+
+Ukuran maksimum adalah 5 MB. Response mengembalikan objek committee member yang
+telah diperbarui, termasuk `profile_photo_url`. Saat foto diganti, file lama
+dihapus setelah update database berhasil. Jika penyimpanan atau update database
+gagal, backend menjaga agar file yatim tidak tertinggal. Frontend membentuk URL
+tampil menggunakan origin API untuk nilai relatif seperti
+`/uploads/committee/{filename}`.
+
+Error upload yang perlu ditangani frontend:
+
+| HTTP | Code | Arti |
+|---:|---|---|
+| `400` | `INVALID_IMAGE_TYPE` | File bukan JPG, PNG, atau WebP |
+| `400` | `EMPTY_IMAGE` | File tidak berisi data |
+| `400` | `IMAGE_TOO_LARGE` | Ukuran file melampaui 5 MB |
+| `404` | `COMMITTEE_MEMBER_NOT_FOUND` | ID member tidak ditemukan |
+| `500` | `UPLOAD_STORAGE_ERROR` | Storage server tidak dapat ditulis |
+
+Panduan implementasi frontend lengkap tersedia di
+`docs/FRONTEND_COMMITTEE_INTEGRATION.md`.
+
 Dokumen tambahan:
 
 - `docs/FRONTEND_BUSINESS_MATCHING_MESSAGING.md`

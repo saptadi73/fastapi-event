@@ -20,7 +20,7 @@ class DelegatePackageService:
             packages_q = packages_q.where(DelegatePackage.is_active.is_(True))
         packages = list((await db.execute(packages_q.order_by(DelegatePackage.display_order, DelegatePackage.code))).scalars())
         if not packages:
-            return {"main_packages": [], "additional_packages": []}
+            return {"main_packages": [], "additional_packages": [], "exhibitor_packages": []}
         ids = [row.id for row in packages]
         rates_q = select(DelegatePackageRate).where(DelegatePackageRate.delegate_package_id.in_(ids))
         facilities_q = select(DelegatePackageFacility).where(DelegatePackageFacility.delegate_package_id.in_(ids))
@@ -39,7 +39,7 @@ class DelegatePackageService:
         rate_map, facility_map = {}, {}
         for row in rates: rate_map.setdefault(row.delegate_package_id, []).append(row)
         for row in facilities: facility_map.setdefault(row.delegate_package_id, []).append(row)
-        main, additional = [], []
+        main, additional, exhibitor = [], [], []
         for package in packages:
             item = schemas.PackageRead.model_validate(package).model_dump()
             package_translation = package_translations.get(package.id)
@@ -63,8 +63,9 @@ class DelegatePackageService:
                 facility_data["content_locale"] = translation.locale if translation else "source"
                 facility_data["translation_fallback"] = translation is None and locale != "en"
                 item["facilities"].append(facility_data)
-            (main if package.package_type == "main" else additional).append(item)
-        return {"main_packages": main, "additional_packages": additional}
+            target = main if package.package_type == "main" else exhibitor if package.package_type == "exhibitor" else additional
+            target.append(item)
+        return {"main_packages": main, "additional_packages": additional, "exhibitor_packages": exhibitor}
 
     @staticmethod
     async def _package(db, package_id, event_id=None):
@@ -79,10 +80,12 @@ class DelegatePackageService:
         payable = rate.payment_amount_idr if rate.payment_amount_idr is not None else rate.amount
         currency = "IDR" if rate.payment_amount_idr is not None else rate.currency
         if product is None:
-            product = Product(id=uuid.uuid4(), delegate_package_rate_id=rate.id, event_id=package.event_id, code=f"DELEGATE_{package.code}_{rate.occupancy_type}"[:60], product_type="delegate" if package.package_type == "main" else "additional", max_quantity=1)
+            product_type = "delegate" if package.package_type == "main" else package.package_type
+            product = Product(id=uuid.uuid4(), delegate_package_rate_id=rate.id, event_id=package.event_id, code=f"{package.package_type.upper()}_{package.code}_{rate.occupancy_type}"[:60], product_type=product_type, max_quantity=1)
             db.add(product)
         product.name = f"{package.name} - {rate.name}"
         product.description = package.description
+        product.product_type = "delegate" if package.package_type == "main" else package.package_type
         product.price, product.currency, product.is_active = payable, currency, package.is_active and rate.is_active
         product.metadata_json = {"delegate_package_id": str(package.id), "delegate_package_rate_id": str(rate.id), "package_type": package.package_type, "package_code": package.code, "package_name": package.name, "rate_name": rate.name, "occupancy_type": rate.occupancy_type, "display_amount": str(rate.amount), "display_currency": rate.currency}
         return product

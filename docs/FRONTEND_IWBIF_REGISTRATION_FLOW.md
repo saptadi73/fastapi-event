@@ -352,19 +352,25 @@ valid; jangan menampilkan form matching sebelum syarat tersebut terpenuhi.
 
 ## 6. Exhibitor
 
-Belum ada katalog atau checkout package Exhibitor. `GET
-/events/{event_id}/exhibitors` hanya menampilkan exhibitor yang sudah submitted,
-bukan pilihan package untuk dibeli. Gunakan alur pendaftaran exhibitor di bawah
-sampai organizer menyediakan master package dan harga Exhibitor.
+`GET /events/{event_id}/exhibitors` menampilkan exhibitor yang sudah submitted,
+bukan pilihan package untuk dibeli. Pilihan paket tersedia melalui endpoint
+katalog package.
 
-1. Buat draft melalui `POST /api/v1/events/{event_id}/exhibitors` tanpa
-   `participant_id`.
-2. Edit dengan `PUT /api/v1/events/{event_id}/exhibitors/{id}` selama masih
+1. User memilih tipe partisipasi: Delegate, Exhibitor, atau keduanya. Package
+   Exhibitor USD 200 berada di `exhibitor_packages` pada katalog package dan
+   dapat di-checkout sendiri tanpa Main Package. Bila memilih Delegate, tepat
+   satu Main Package wajib dipilih; Additional Package hanya dapat dipilih
+   bersama Main Package atau sesudah pembayaran Main Package lunas.
+2. Checkout Package Exhibitor (sendiri atau bersama Main Package), lalu buat
+   draft melalui `POST /api/v1/events/{event_id}/exhibitors`. Tanpa order aktif
+   yang memuat Package Exhibitor, backend mengembalikan
+   `EXHIBITOR_PACKAGE_REQUIRED`. `participant_id` tetap opsional.
+3. Edit dengan `PUT /api/v1/events/{event_id}/exhibitors/{id}` selama masih
    `draft`.
-3. Upload katalog melalui
+4. Upload katalog melalui
    `POST /api/v1/exhibitors/{id}/product-catalogue` menggunakan field multipart
    `file`.
-4. Upload sukses mengubah status menjadi `submitted`; form kemudian read-only.
+5. Upload sukses mengubah status menjadi `submitted`; form kemudian read-only.
 
 Satu user hanya dapat memiliki satu exhibitor untuk event yang sama. HTTP 409
 `EXHIBITOR_EXISTS` harus diarahkan ke draft/detail yang sudah ada, bukan membuat
