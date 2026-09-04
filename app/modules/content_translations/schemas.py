@@ -8,12 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class TranslationWrite(BaseModel):
     fields: dict[str, Any] = Field(min_length=1)
 
-    @field_validator("fields")
+    @field_validator("fields", mode="before")
     @classmethod
-    def fields_must_have_values(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if any(item is None or (isinstance(item, str) and not item.strip()) for item in value.values()):
-            raise ValueError("Translation fields cannot contain null or blank values")
-        return value
+    def omit_empty_optional_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return {
+            key: item
+            for key, item in value.items()
+            if item is not None and not (isinstance(item, str) and not item.strip())
+        }
 
 
 class TranslationRead(BaseModel):

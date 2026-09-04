@@ -43,6 +43,15 @@ class ContentTranslationContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             TranslationWrite(fields={"name": "  "})
 
+    def test_translation_ignores_blank_optional_values(self):
+        payload = TranslationWrite(fields={
+            "professional_title": "主持人",
+            "organization_name": "",
+            "biography": None,
+        })
+
+        self.assertEqual({"professional_title": "主持人"}, payload.fields)
+
     def test_expertise_tags_must_be_a_list_of_non_empty_strings(self):
         validate_fields("speaker", {"expertise_tags": ["Investment", "Trade"]})
         with self.assertRaises(ValidationException) as not_list:
