@@ -463,7 +463,7 @@ looking-for, preferred countries, room preferences, airports, dan booth sizes.
 
 Endpoint `delegate-packages` mempertahankan response flat untuk kompatibilitas.
 Gunakan `delegate-package-catalog` untuk UI baru; response dikelompokkan menjadi
-Main wajib dan Additional opsional:
+Main wajib untuk Delegate, Additional khusus Delegate, dan Exhibitor opsional:
 
 ```json
 {
@@ -480,6 +480,14 @@ Main wajib dan Additional opsional:
     "selection_mode":"optional","rates":[
       {"product_id":"product-bandung-sharing","occupancy_type":"sharing","amount":200,"currency":"USD","is_default":true},
       {"product_id":"product-bandung-single","occupancy_type":"single","amount":300,"currency":"USD","is_default":false}
+    ],
+    "facilities":[]
+  }],
+  "exhibitor_packages": [{
+    "id":"uuid-exhibitor","code":"EXHIBITOR","name":"Exhibitor Package - USD200",
+    "package_type":"exhibitor","selection_mode":"optional","amount":200,"currency":"USD",
+    "payment_amount_idr":3600000,"rates":[
+      {"product_id":"product-exhibitor","occupancy_type":"standard","name":"Exhibitor Access","amount":200,"currency":"USD","payment_amount_idr":3600000,"is_default":true}
     ],
     "facilities":[]
   }]
@@ -502,6 +510,7 @@ Seed memakai kurs tetap yang disetujui organizer: **1 USD = IDR 18.000**.
 | B | Single | 550 | 9.900.000 |
 | Bandung | Sharing | 200 | 3.600.000 |
 | Bandung | Single | 300 | 5.400.000 |
+| Exhibitor | Standard | 200 | 3.600.000 |
 
 Nilai IDR tetap dapat diubah organizer melalui rate editor dan tidak dihitung
 ulang otomatis mengikuti kurs.
@@ -531,10 +540,16 @@ memakai harga IDR. Jika null, product memakai `amount/currency` display; fronten
 harus menghindari checkout payment rail IDR sampai seluruh rate terpilih memiliki
 nilai IDR. Backend tetap menolak cart mixed-currency.
 
-Main wajib tepat satu dan default occupancy adalah rate `is_default=true`
-(`sharing`). Bandung berupa checkbox; ketika dicentang default-nya sharing dan
-participant boleh mengganti ke single. Menambahkan rate lain pada group yang
-sama otomatis mengganti item cart sebelumnya.
+Aturan checkout package:
+
+- Delegate wajib memilih tepat satu Main Package.
+- Delegate boleh menambahkan Additional Package dan Package Exhibitor.
+- Package Exhibitor boleh dibeli sendiri tanpa Main Package dan tanpa menjadi Delegate.
+- Additional Package tidak boleh dibeli tanpa Main Package. Pembelian terpisah
+  setelah registrasi hanya tersedia jika pembayaran Main Package sudah lunas.
+- Default Main/Additional menggunakan rate `is_default=true`; Package Exhibitor
+  menggunakan occupancy `standard`.
+- Menambahkan rate lain pada package yang sama otomatis mengganti pilihan lama.
 
 ## 4. Participant profile
 
@@ -789,6 +804,11 @@ DELETE /api/v1/events/{event_id}/exhibitors/{exhibitor_id}
 POST   /api/v1/exhibitors/{exhibitor_id}/product-catalogue
 ```
 
+Sebelum create, user wajib memiliki order aktif (`pending`, `partially_paid`,
+atau `paid`) yang memuat product Package Exhibitor. Order tersebut boleh berupa
+checkout Exhibitor-only atau gabungan Main Delegate + Exhibitor. Jika tidak ada,
+create ditolak dengan `EXHIBITOR_PACKAGE_REQUIRED`.
+
 Create menghasilkan draft. Upload catalogue (`file`, max 10 MB) mengubah status
 menjadi submitted. List event hanya menampilkan submitted. Update/delete hanya
 draft milik user. Satu akun hanya dapat membuat satu exhibitor per event;
@@ -801,9 +821,10 @@ Metode pembayaran juga tidak diisi pada form Delegate/Exhibitor; pemilihan kanal
 dilakukan pada tahap checkout atau payment DOKU.
 
 Endpoint `GET /api/v1/events/{event_id}/exhibitors` adalah daftar exhibitor yang
-sudah submitted, bukan katalog paket Exhibitor. Backend belum menyediakan master
-package/harga atau checkout Exhibitor; jangan tampilkan endpoint ini sebagai
-pilihan pembelian sampai organizer mendefinisikan package tersebut.
+sudah submitted, bukan katalog paket Exhibitor. Ambil Package Exhibitor USD 200
+dari `exhibitor_packages` pada
+`GET /api/v1/events/{event_id}/delegate-package-catalog`, kemudian kirim
+`rates[0].product_id` ke cart dan checkout sebelum membuka form Exhibitor.
 
 ## 9. Business Matching profile dan discovery
 
@@ -2275,6 +2296,30 @@ tetap dapat diaudit. Satu package hanya boleh mempunyai satu rate per occupancy
 dan satu default aktif. Perubahan rate otomatis disinkronkan ke product checkout;
 order dan registration menyimpan snapshot nama, occupancy, serta harga.
 
+Endpoint CRUD tersebut berlaku untuk `main`, `additional`, dan `exhibitor`.
+Contoh membuat Package Exhibitor:
+
+```json
+{
+  "code":"EXHIBITOR",
+  "name":"Exhibitor Package - USD200",
+  "package_type":"exhibitor",
+  "selection_mode":"optional",
+  "description":"Exhibitor access without requiring delegate registration",
+  "display_order":20,
+  "currency":"USD",
+  "amount":200,
+  "payment_amount_idr":3600000,
+  "is_active":true
+}
+```
+
+Setelah package dibuat, tambahkan rate melalui endpoint rate dengan
+`occupancy_type=standard`. Product checkout bertipe `exhibitor` dibuat otomatis
+saat rate dibuat. Update package/rate menyinkronkan product tersebut, sedangkan
+DELETE package menonaktifkan package dan product checkout tanpa menghapus
+histori order.
+
 Facility mendukung `pricing_mode=included|separately_priced`, breakdown
 `sharing_amount`/`single_amount`, currency, quantity/unit, urutan, dan status.
 Pada implementasi saat ini total package tetap berasal dari rate package;
@@ -2354,11 +2399,16 @@ Path item literal untuk GET/PUT/DELETE:
 /api/v1/admin/events/{event_id}/business-matching-slots/{item_id}
 ```
 
-Master payload:
+Master payload Main Package:
 
 ```json
 {"code":"A","name":"Package A","currency":"USD","amount":500,"payment_amount_idr":8000000,"is_active":true}
 ```
+
+Nilai `package_type` yang didukung: `main`, `additional`, dan `exhibitor`.
+`main` wajib memakai `selection_mode=required_one`; tipe lainnya wajib memakai
+`selection_mode=optional`. Nilai occupancy rate yang didukung adalah `sharing`,
+`single`, dan `standard`.
 
 ```json
 {"name":"Business Forum","is_active":true}

@@ -62,15 +62,19 @@ Alur pembelian Delegate dimulai dari katalog store, bukan dari form registrasi:
 GET products -> add cart item -> checkout -> DOKU payment -> Delegate form
 ```
 
-Render pilihan dari `GET /events/{event_id}/delegate-package-catalog`. Main A/B berupa
-radio group wajib. Setiap package mempunyai radio occupancy sharing/single;
-pilih rate `is_default=true` saat pertama kali package dipilih. Bandung berupa
-checkbox; ketika aktif gunakan sharing default dan tampilkan pilihan single.
+Render pilihan dari `GET /events/{event_id}/delegate-package-catalog`. Tampilkan
+pilihan awal Delegate atau Exhibitor, dengan opsi memilih keduanya. Main A/B
+berupa radio group wajib hanya ketika Delegate dipilih. Setiap Main mempunyai
+radio occupancy sharing/single; pilih rate `is_default=true` saat pertama kali
+package dipilih. Bandung berupa checkbox khusus Delegate. Package Exhibitor
+berupa checkbox dengan rate `standard` dan dapat dipilih tanpa Delegate.
 
 Tambahkan `rate.product_id` ke cart. Backend otomatis mengganti Main lama ketika
-user memilih A/B atau occupancy lain, dan mengganti rate Bandung ketika occupancy
-diubah. Checkout ditolak jika tidak ada tepat satu Main. Frontend tidak mengirim
-harga, `delegate_package_id`, atau `rate_id` secara terpisah.
+user memilih A/B atau occupancy lain, dan mengganti rate package yang sama
+ketika occupancy diubah. Checkout Delegate ditolak jika tidak ada tepat satu
+Main. Checkout Exhibitor-only tetap valid. Additional tanpa Main selalu ditolak.
+Frontend tidak mengirim harga, `delegate_package_id`, atau `rate_id` secara
+terpisah.
 
 Backend mengambil package/rate dari product pada order milik user, menautkan
 order ke registration, dan membuat snapshot `package_selections`. Harga checkout
@@ -81,7 +85,7 @@ selalu ditentukan server-side.
 State minimum frontend:
 
 ```ts
-type Occupancy = "sharing" | "single";
+type Occupancy = "sharing" | "single" | "standard";
 
 type DelegatePackageSelection = {
   mainPackageId: string | null;
@@ -90,6 +94,9 @@ type DelegatePackageSelection = {
   bandungSelected: boolean;
   bandungRateId: string | null;
   bandungProductId: string | null;
+  exhibitorSelected: boolean;
+  exhibitorRateId: string | null;
+  exhibitorProductId: string | null;
 };
 ```
 
@@ -189,6 +196,26 @@ Form package:
 Untuk UI baru, edit harga melalui rate. Ketika default rate diperbarui, backend
 menyinkronkan kedua field legacy tersebut.
 
+Untuk Package Exhibitor, gunakan form CRUD package yang sama:
+
+```json
+{
+  "code":"EXHIBITOR",
+  "name":"Exhibitor Package - USD200",
+  "package_type":"exhibitor",
+  "selection_mode":"optional",
+  "description":"Exhibitor access without requiring delegate registration",
+  "display_order":20,
+  "currency":"USD",
+  "amount":200,
+  "payment_amount_idr":3600000,
+  "is_active":true
+}
+```
+
+Rate Exhibitor memakai `occupancy_type="standard"`, nama `Exhibitor Access`,
+USD 200, payment IDR 3.600.000, dan `is_default=true`.
+
 Form rate:
 
 ```json
@@ -263,6 +290,7 @@ invalidate admin catalog, public catalog, store products, dan cart aktif.
 | HTTP/code | Perilaku UI |
 |---|---|
 | `MAIN_PACKAGE_REQUIRED` | Fokuskan radio Main dan tampilkan bahwa A/B wajib dipilih |
+| `EXHIBITOR_PACKAGE_REQUIRED` | Arahkan user memilih dan checkout Package Exhibitor sebelum membuka form exhibitor |
 | `PACKAGE_RATE_INACTIVE` | Reload catalog lalu minta user memilih rate aktif |
 | `PACKAGE_RATE_EXISTS` | Tandai occupancy sharing/single sudah tersedia |
 | `DEFAULT_RATE_REQUIRED` | Minta admin memilih default pengganti terlebih dahulu |
@@ -355,6 +383,13 @@ valid; jangan menampilkan form matching sebelum syarat tersebut terpenuhi.
 `GET /events/{event_id}/exhibitors` menampilkan exhibitor yang sudah submitted,
 bukan pilihan package untuk dibeli. Pilihan paket tersedia melalui endpoint
 katalog package.
+
+Package Exhibitor menggunakan CRUD admin package yang sama dengan package lain:
+`POST /admin/events/{event_id}/delegate-packages`, lalu `GET`, `PUT`, dan
+`DELETE /admin/events/{event_id}/delegate-packages/{item_id}`. Isi
+`package_type` dengan `exhibitor` dan `selection_mode` dengan `optional`.
+Tarif serta fasilitasnya juga menggunakan endpoint package rate/facility yang
+sama.
 
 1. User memilih tipe partisipasi: Delegate, Exhibitor, atau keduanya. Package
    Exhibitor USD 200 berada di `exhibitor_packages` pada katalog package dan
