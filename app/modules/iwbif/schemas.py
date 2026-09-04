@@ -186,17 +186,17 @@ class SlotWrite(BaseModel):
 class ExhibitorWrite(BaseModel):
     participant_id: UUID | None = None
     company_name: str = Field(min_length=1); brand: str = Field(min_length=1); contact_person: str = Field(min_length=1)
-    email: str; products_to_display: str = Field(min_length=1)
+    products_to_display: str = Field(min_length=1)
     booth_size_requested: str; electricity_requirement: str = Field(min_length=1); special_requirement: str = Field(min_length=1)
     exhibition_terms_accepted: bool; exhibition_terms_version: str = Field(min_length=1)
     @model_validator(mode="after")
     def validate_values(self):
-        if "@" not in self.email or self.email.startswith("@") or self.email.endswith("@"): raise ValueError("Invalid email")
         if self.booth_size_requested not in BOOTH_SIZES: raise ValueError("Invalid booth size")
         if not self.exhibition_terms_accepted: raise ValueError("Exhibition terms must be accepted")
         return self
 
 class ExhibitorRead(ExhibitorWrite):
+    email: str
     id: UUID; event_id: UUID; status: str; created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

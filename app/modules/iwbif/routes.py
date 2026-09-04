@@ -208,7 +208,7 @@ async def update_exhibitor(event_id: UUID, exhibitor_id: UUID, payload: schemas.
     if not row or row.event_id != event_id or not participant or participant.user_id != user.id: raise NotFoundException("EXHIBITOR_NOT_FOUND", "Exhibitor tidak ditemukan")
     if row.status != "draft": raise ConflictException("EXHIBITOR_NOT_EDITABLE", "Hanya draft exhibitor yang dapat diubah")
     if payload.participant_id and payload.participant_id != row.participant_id: raise ValidationException("PARTICIPANT_IMMUTABLE", "Participant tidak dapat diubah")
-    data = payload.model_dump(exclude={"participant_id"}); data["email"] = str(data["email"])
+    data = payload.model_dump(exclude={"participant_id"}); data["email"] = user.email
     company = await IwbifService.upsert_company(db, row.participant_id, name=payload.company_name, country=await IwbifService.account_country(db, user.id))
     row.company_id = company.id
     for key, value in data.items(): setattr(row, key, value)

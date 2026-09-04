@@ -470,8 +470,19 @@ profile_sharing_consent_at
 | country | string | Yes |
 | brand | string | Yes |
 | contact_person | string | Yes |
-| email | email/string | Yes |
+| email | email/string | Otomatis dari akun user; hanya pada response |
 | phone | string | Yes |
+
+Email bukan input form Exhibitor dan tidak dikirim pada request create/update.
+Backend mengisi `exhibitor_registrations.email` dari `users.email` milik akun
+yang login saat create maupun update draft. Email yang masih dikirim client
+lama diabaikan. Response tetap menyertakan `email`; data lama tidak diubah
+secara massal. Frontend harus menghapus input serta validasi wajib email pada
+form Exhibitor, sementara email tetap wajib pada user registration.
+
+Country dan phone pada tabel di atas berasal dari akun user, bukan input ulang
+Exhibitor: country company diambil dari `users.country`, sedangkan nomor telepon
+tetap tersimpan pada `users.phone`.
 
 ## 6.2 Exhibition
 

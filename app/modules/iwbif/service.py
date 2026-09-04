@@ -281,7 +281,8 @@ class IwbifService:
         existing = (await db.execute(select(ExhibitorRegistration.id).where(ExhibitorRegistration.event_id == event_id, ExhibitorRegistration.participant_id == participant.id))).first()
         if existing: raise ConflictException("EXHIBITOR_EXISTS", "User sudah memiliki registrasi exhibitor untuk event ini")
         company = await IwbifService.upsert_company(db, participant.id, name=payload.company_name, country=await IwbifService.account_country(db, user_id))
-        data = payload.model_dump(exclude={"participant_id"}); data["email"] = str(data["email"]); data.update(event_id=event_id, participant_id=participant.id, company_id=company.id, exhibition_terms_accepted_at=datetime.now(timezone.utc))
+        user = await db.get(User, user_id)
+        data = payload.model_dump(exclude={"participant_id"}); data["email"] = user.email; data.update(event_id=event_id, participant_id=participant.id, company_id=company.id, exhibition_terms_accepted_at=datetime.now(timezone.utc))
         row = ExhibitorRegistration(**data); db.add(row); await db.commit(); await db.refresh(row); return row
 
     @staticmethod
