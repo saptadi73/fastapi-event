@@ -7,13 +7,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.modules.payments.models import Order, OrderKind, OrderStatus
 from app.modules.store.models import Cart, CartItem, OrderItem, Product
-from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate, DelegateRegistrationPackageSelection
+from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate, DelegateRegistrationPackageSelection, ExhibitorRegistration
+from app.modules.users.models import User
 from app.modules.participants.models import ParticipantProfile
 from app.modules.registrations.models import Registration, RegistrationStatus
 
 
 class StoreService:
     ACTIVE_ORDER_STATUSES = {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.PAID}
+
+    @staticmethod
+    async def exhibitor_availability(db: AsyncSession, user_id, event_id):
+        order = (await db.execute(
+            select(Order).join(OrderItem, OrderItem.order_id == Order.id).where(
+                Order.user_id == user_id, Order.event_id == event_id,
+                Order.status.in_(StoreService.ACTIVE_ORDER_STATUSES),
+                OrderItem.product_type == "exhibitor",
+            ).order_by(Order.created_at.desc()).limit(1)
+        )).scalars().first()
+        registration_id = (await db.execute(
+            select(ExhibitorRegistration.id)
+            .join(ParticipantProfile, ParticipantProfile.id == ExhibitorRegistration.participant_id)
+            .where(ParticipantProfile.user_id == user_id, ExhibitorRegistration.event_id == event_id)
+            .limit(1)
+        )).scalar_one_or_none()
+        return {
+            "is_purchasable": order is None and registration_id is None,
+            "existing_order_id": order.id if order else None,
+            "order_status": order.status if order else None,
+            "exhibitor_id": registration_id,
+        }
+
+    @staticmethod
+    async def _require_exhibitor_available(db, user_id, event_id):
+        # Serialize purchases for this owner, including requests from different tabs.
+        await db.execute(select(User.id).where(User.id == user_id).with_for_update())
+        state = await StoreService.exhibitor_availability(db, user_id, event_id)
+        if not state["is_purchasable"]:
+            raise ConflictException(
+                "EXHIBITOR_PACKAGE_ALREADY_SELECTED",
+                "Anda sudah terdaftar atau memiliki pesanan exhibitor. Lengkapi data dan pembayaran pesanan yang sudah ada.",
+            )
 
     @staticmethod
     async def _active_registration(db: AsyncSession, user_id, event_id, *, lock: bool = False):
@@ -114,7 +148,15 @@ class StoreService:
         product = await db.get(Product, payload.product_id)
         if not product or product.event_id != event_id or not product.is_active:
             raise NotFoundException("PRODUCT_NOT_FOUND", "Product tidak ditemukan atau tidak aktif")
+        if product.product_type == "exhibitor":
+            await StoreService._require_exhibitor_available(db, user_id, event_id)
+            if payload.quantity != 1:
+                raise ValidationException("PACKAGE_QUANTITY_INVALID", "Exhibitor package hanya dapat dipilih satu kali")
         cart, rows = await StoreService.get_cart(db, user_id, event_id)
+        if product.product_type == "exhibitor":
+            existing_ids = [item.id for item, selected in rows if selected.product_type == "exhibitor"]
+            if existing_ids:
+                await db.execute(delete(CartItem).where(CartItem.id.in_(existing_ids)))
         if product.delegate_package_rate_id:
             rate = await db.get(DelegatePackageRate, product.delegate_package_rate_id)
             package = await db.get(DelegatePackage, rate.delegate_package_id) if rate else None
@@ -163,6 +205,8 @@ class StoreService:
 
     @staticmethod
     async def checkout(db: AsyncSession, user_id, event_id, locale="en"):
+        # Match add_item's owner-before-cart lock order to avoid deadlocks.
+        await db.execute(select(User.id).where(User.id == user_id).with_for_update())
         cart = (await db.execute(
             select(Cart)
             .where(Cart.user_id == user_id, Cart.event_id == event_id)
@@ -178,6 +222,11 @@ class StoreService:
         )).all()
         if not rows:
             raise ValidationException("EMPTY_CART", "Cart masih kosong")
+        exhibitor_items = [(item, product) for item, product in rows if product.product_type == "exhibitor"]
+        if exhibitor_items:
+            await StoreService._require_exhibitor_available(db, user_id, event_id)
+            if len(exhibitor_items) != 1 or exhibitor_items[0][0].quantity != 1:
+                raise ValidationException("PACKAGE_QUANTITY_INVALID", "Pilih tepat satu exhibitor package")
         linked = [(item, product) for item, product in rows if product.delegate_package_rate_id]
         if linked:
             selections = []

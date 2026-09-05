@@ -489,16 +489,25 @@ tetap tersimpan pada `users.phone`.
 | API Field | Type | Required |
 |---|---|---:|
 | products_to_display | text | Yes |
-| booth_size_requested | enum | Yes |
+| booth_size_requested | string nomor 1–40 | Yes |
 | electricity_requirement | text | Yes |
 | special_requirement | text | Yes |
 | product_catalogue | file | Yes |
 
-Booth options:
+Label frontend: **Booth number requested**, dengan pilihan nomor 1–40.
+Nama field API/database tetap `booth_size_requested` untuk kompatibilitas;
+create/update menerima string `"1"` sampai `"40"`. Data ukuran booth lama tetap
+dapat dibaca, tetapi user harus memilih nomor saat memperbarui draft. Tidak ada
+konversi otomatis data lama atau validasi keunikan nomor antar-exhibitor.
 
-- Standard Booth 3x3
-- Premium Booth
-- Custom Booth
+Sebelum pembelian, frontend memeriksa
+`GET /api/v1/store/events/{event_id}/exhibitor-availability/me`.
+Registrasi exhibitor yang sudah ada atau order berisi item exhibitor dengan
+status `draft`, `pending`, `partially_paid`, atau `paid` memblokir pembelian ulang
+untuk user/event yang sama. Tambah cart dan checkout menegakkan aturan ini
+dengan HTTP 409 `EXHIBITOR_PACKAGE_ALREADY_SELECTED`. User diarahkan melengkapi
+profil serta pembayaran order yang sudah ada. Detail field response dan alur
+tersedia di [API Reference](API_REFERENCE.md#8-exhibitor).
 
 ## 6.3 Consent
 

@@ -27,6 +27,12 @@ async def products(event_id: UUID, request: Request, db: AsyncSession = Depends(
     return success_response("Product ditemukan", data, request=request)
 
 
+@router.get("/events/{event_id}/exhibitor-availability/me")
+async def my_exhibitor_availability(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
+    data = await StoreService.exhibitor_availability(db, user.id, event_id)
+    return success_response("Status exhibitor package ditemukan", data=data, request=request)
+
+
 @router.get("/events/{event_id}/additional-products/me")
 async def my_additional_products(event_id: UUID, request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db_session)):
     rows = await StoreService.additional_availability(db, user.id, event_id)

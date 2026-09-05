@@ -191,7 +191,7 @@ class ExhibitorWrite(BaseModel):
     exhibition_terms_accepted: bool; exhibition_terms_version: str = Field(min_length=1)
     @model_validator(mode="after")
     def validate_values(self):
-        if self.booth_size_requested not in BOOTH_SIZES: raise ValueError("Invalid booth size")
+        if self.booth_size_requested not in BOOTH_SIZES: raise ValueError("Select a booth number between 1 and 40")
         if not self.exhibition_terms_accepted: raise ValueError("Exhibition terms must be accepted")
         return self
 
@@ -199,6 +199,11 @@ class ExhibitorRead(ExhibitorWrite):
     email: str
     id: UUID; event_id: UUID; status: str; created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def validate_values(self):
+        # Historical booth sizes must remain readable so owners can update them.
+        return self
 
 class MatchingProfileWrite(BaseModel):
     company_name: str = Field(min_length=1); country: str = Field(min_length=1); representative: str = Field(min_length=1)

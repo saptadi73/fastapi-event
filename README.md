@@ -42,6 +42,14 @@ soft-cancel melalui `DELETE /api/v1/orders/{order_id}` tanpa menghapus riwayat
 payment attempt.
 Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
 
+Form exhibitor menggunakan **Booth number requested** dengan pilihan 1–40.
+Field API tetap `booth_size_requested` dan berisi nomor sebagai string.
+User yang sudah memiliki registrasi exhibitor atau order exhibitor aktif,
+termasuk pending, harus melanjutkan profil/pembayaran yang sudah ada.
+Tambah cart dan checkout memblokir pembelian ulang. Kontrak pengecekan status
+dan alur frontend tersedia di [Frontend Store Purchase Flow](docs/FRONTEND_STORE_PURCHASE_FLOW.md#periksa-pembelian-exhibitor)
+dan [API Reference](docs/API_REFERENCE.md#8-exhibitor).
+
 Backend mendukung locale `en` dan `zh-CN` (Simplified Chinese) tanpa
 menggandakan endpoint. Frontend dapat memakai `?locale=zh-CN` atau header
 `Accept-Language: zh-CN`. Preferensi email disimpan pada `preferred_locale` user.

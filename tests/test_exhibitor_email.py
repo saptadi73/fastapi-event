@@ -14,7 +14,7 @@ def exhibitor_payload(**extra):
     return ExhibitorWrite(
         company_name="Example SME", brand="Example Brand",
         contact_person="Contact Name", products_to_display="Food products",
-        booth_size_requested="Standard Booth 3x3",
+        booth_size_requested="1",
         electricity_requirement="220V", special_requirement="None",
         exhibition_terms_accepted=True, exhibition_terms_version="v1", **extra,
     )
