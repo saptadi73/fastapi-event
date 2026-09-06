@@ -24,6 +24,8 @@ from app.modules.email_notifications.service import deliver_payment_for_order
 from app.modules.tickets import schemas as ticket_schemas
 
 router = APIRouter(tags=["payments"])
+from app.modules.payments.doku_order import router as doku_order_router
+router.include_router(doku_order_router)
 logger = logging.getLogger(__name__)
 
 _WEBHOOK_CAPTURE_HEADERS = {

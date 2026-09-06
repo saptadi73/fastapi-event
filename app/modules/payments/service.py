@@ -911,7 +911,7 @@ class PaymentService:
         order = await session.get(Order, payment.order_id, with_for_update=True)
         if not order:
             raise NotFoundException("DOKU_ORDER_NOT_FOUND", "Order tidak ditemukan")
-        if Decimal(str(paid["value"])) != Decimal(str(order.total_amount)):
+        if Decimal(str(paid["value"])) != Decimal(str(payment.gross_amount)):
             raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal pembayaran tidak sesuai order")
         provider = "doku_snap_va"
         duplicate = await PaymentRepository.get_webhook_event(session, external_id, provider)
