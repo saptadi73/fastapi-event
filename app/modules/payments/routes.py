@@ -701,6 +701,13 @@ async def admin_payment_report_csv(
     )
 
 
+@router.post("/doku/va/inquiry", summary="DOKU BRI Non-SNAP VA inquiry")
+async def doku_va_inquiry(request: Request, db: AsyncSession = Depends(get_db_session)):
+    from app.modules.payments.doku_inquiry import handle_inquiry
+    return await handle_inquiry(db, await request.body(), dict(request.headers),
+                                get_settings(), request.url.path)
+
+
 @router.post("/webhooks/doku", summary="DOKU payment notification")
 async def doku_notification(
     request: Request,
