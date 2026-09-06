@@ -606,7 +606,7 @@ draft → submitted → under_verification → verified/payment_pending
 ```
 
 - Hanya `draft` yang dapat diedit atau disubmit.
-- `PASSPORT_COPY` wajib sebelum submit.
+- `PASSPORT_COPY` opsional; submit tetap diperbolehkan tanpa unggahan paspor.
 - Satu participant hanya boleh punya satu registrasi aktif per event.
 - Business Matching IWBIF baru tersedia setelah `confirmed`.
 
@@ -776,6 +776,14 @@ file=<PDF/JPG/PNG>
 
 Jenis: `PASSPORT_COPY`, `COMPANY_PROFILE`, `BUSINESS_CARD`, `COMPANY_LOGO`,
 `PRODUCT_CATALOGUE`. Maksimum 10 MB; MIME PDF/JPEG/PNG.
+
+Paspor merupakan dokumen opsional, bukan syarat submit Delegate. Upload tetap
+tersedia untuk draft; file kosong atau tidak memenuhi format/ukuran ditolak.
+Tidak memilih file berarti melewati upload, bukan mengirim multipart kosong.
+Simpan draft terlebih dahulu untuk memperoleh `registration_id`, unggah bila
+peserta memilih file, lalu panggil endpoint `/submit`. Create/PATCH saja tetap
+menyimpan draft; submit tidak otomatis melunasi order atau menerbitkan tiket.
+
 
 ```http
 GET    /api/v1/registrations/{registration_id}/documents
@@ -2603,7 +2611,7 @@ Alur store-first utama:
 
 ```text
 register/login → auth/me → event/store → cart → checkout → pilih DOKU/Midtrans
-→ payment success → registration draft → upload passport → submit
+→ payment success → registration draft → optional passport upload → submit
 → organizer verification/confirmation → ticket → matching profile
 ```
 
@@ -2611,7 +2619,7 @@ Alur registration-first kompatibilitas:
 
 ```text
 register/login → auth/me → participants/me → event/master → registration draft
-→ upload passport → submit → organizer verification → DOKU VA + polling
+→ optional passport upload → submit → organizer verification → DOKU VA + polling
 → confirmed/ticket → matching profile → discovery → messaging → meeting
 ```
 
