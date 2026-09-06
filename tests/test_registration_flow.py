@@ -90,6 +90,33 @@ class RegistrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         database.execute.assert_not_awaited()
         database.commit.assert_not_awaited()
 
+    async def test_submit_without_passport_preserves_payment_gate(self):
+        event_id = uuid.uuid4()
+        registration = SimpleNamespace(id=uuid.uuid4(), event_id=event_id, status=RegistrationStatus.DRAFT)
+        detail = SimpleNamespace(submitted_at=None)
+        database = AsyncMock()
+        database.get.return_value = detail
+        with patch.object(IwbifService, "owned_registration", AsyncMock(return_value=registration)):
+            result = await IwbifService.submit(database, event_id, registration.id, uuid.uuid4())
+        self.assertEqual(result.status, RegistrationStatus.SUBMITTED)
+        self.assertIsNotNone(detail.submitted_at)
+        database.execute.assert_not_awaited()
+        database.commit.assert_awaited_once()
+        unpaid = MagicMock()
+        unpaid.scalar_one_or_none.return_value = None
+        database.execute.return_value = unpaid
+        with self.assertRaises(ConflictException):
+            await IwbifService.require_paid_order(database, registration.id)
+
+    async def test_submit_rejects_non_draft_without_changes(self):
+        event_id = uuid.uuid4()
+        registration = SimpleNamespace(id=uuid.uuid4(), event_id=event_id, status=RegistrationStatus.SUBMITTED)
+        database = AsyncMock()
+        with patch.object(IwbifService, "owned_registration", AsyncMock(return_value=registration)):
+            with self.assertRaises(ConflictException):
+                await IwbifService.submit(database, event_id, registration.id, uuid.uuid4())
+        database.commit.assert_not_awaited()
+
     async def test_confirmation_requires_paid_linked_order(self):
         database = AsyncMock()
         result = MagicMock()

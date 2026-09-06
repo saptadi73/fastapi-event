@@ -219,8 +219,7 @@ class IwbifService:
         if reg.event_id != event_id:
             raise NotFoundException("REGISTRATION_NOT_FOUND", "Registrasi tidak ditemukan")
         if reg.status != RegistrationStatus.DRAFT: raise ConflictException("INVALID_REGISTRATION_STATUS", "Hanya draft yang dapat dikirim")
-        passport = (await db.execute(select(RegistrationDocument.id).where(RegistrationDocument.registration_id == reg.id, RegistrationDocument.document_type == "PASSPORT_COPY"))).first()
-        if not passport: raise ValidationException("PASSPORT_REQUIRED", "Passport Copy wajib diunggah sebelum submit")
+        # Passport copies are optional supporting documents.
         reg.status = RegistrationStatus.SUBMITTED; detail = await db.get(DelegateRegistrationDetail, reg.id); detail.submitted_at = datetime.now(timezone.utc)
         await db.commit(); return reg
 
