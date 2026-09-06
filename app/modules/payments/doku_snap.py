@@ -208,6 +208,9 @@ class DokuSnapClient:
         if not config or not config.get("partner_service_id"):
             raise ValidationException("DOKU_VA_CHANNEL_NOT_CONFIGURED", f"VA {bank_code.upper()} belum dikonfigurasi")
         path = config.get("create_path", self.settings.DOKU_SNAP_VA_CREATE_PATH)
+        # DOKU's Mandiri identifier includes BANK; normalize before signing.
+        channel = "VIRTUAL_ACCOUNT_BANK_MANDIRI" if bank_code.upper() == "MANDIRI" else f"VIRTUAL_ACCOUNT_{bank_code.upper()}"
+        payload["additionalInfo"] = {**(payload.get("additionalInfo") or {}), "channel": channel}
         payload["partnerServiceId"] = config["partner_service_id"]
         if "customer_no" in config:
             payload["customerNo"] = str(config["customer_no"])

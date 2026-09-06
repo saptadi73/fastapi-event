@@ -115,8 +115,10 @@ async def create_payment(db, order_id, choice, user):
         raise ValidationException("DOKU_CHANNEL_NOT_ENABLED", "Metode DOKU ini belum aktif")
     sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(db, order)
     _, remaining = await PaymentService._payment_progress(db, order)
-    # VA supports the whole remaining balance. QRIS/cards retain segmentation.
-    amount = Decimal(str(remaining if choice.method == "virtual_account" else segment_amount)).quantize(Decimal("0.01"))
+    # Only QRIS is capped; VA and cards collect the full remaining balance.
+    if choice.method != "qris":
+        sequence_count = sequence
+    amount = Decimal(str(segment_amount if choice.method == "qris" else remaining)).quantize(Decimal("0.01"))
     if amount <= 0:
         raise ConflictException("ORDER_ALREADY_PAID", "Order sudah lunas")
     expires = min(utc(order.expires_at), now + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)) if order.expires_at else now + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)
@@ -125,7 +127,7 @@ async def create_payment(db, order_id, choice, user):
         order_id=order.id, provider="doku_snap_qris" if choice.method == "qris" else "doku",
         payment_type={"virtual_account": "doku_snap_va", "qris": "doku_snap_qris", "credit_card": "CREDIT_CARD"}[choice.method],
         channel_code=choice.bank_code, gross_amount=amount, currency="IDR",
-        payment_sequence=sequence, payment_sequence_count=sequence if choice.method == "virtual_account" else sequence_count,
+        payment_sequence=sequence, payment_sequence_count=sequence_count,
         provider_order_id=reference, transaction_status=PaymentStatus.CREATED, expired_at=expires,
     )
     db.add(payment)

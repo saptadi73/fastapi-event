@@ -58,6 +58,36 @@ class DokuOrderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["additional_info"]["order_id"], str(self.order.id))
         self.assertEqual(data["payment_url"], "https://checkout.doku.com/card")
 
+    async def test_methods_use_expected_amounts_at_split_boundaries(self):
+        for total in (Decimal("8999999"), Decimal("9000000"), Decimal("9000001"), Decimal("27000000")):
+            for method in ("qris", "virtual_account", "credit_card"):
+                with self.subTest(total=total, method=method):
+                    plan = pilot.PaymentService._segment_plan(total)
+                    pilot.PaymentService._next_payment_segment.return_value = (1, len(plan), plan[0])
+                    pilot.PaymentService._payment_progress.return_value = (Decimal("0"), total)
+                    choice = pilot.DokuOrderChoice(method=method, bank_code="BCA" if method == "virtual_account" else None)
+                    data = await pilot.create_payment(self.db, self.order.id, choice, self.user)
+                    expected = plan[0] if method == "qris" else total
+                    self.assertEqual(data["amount"], expected)
+                    self.assertEqual(data["payment_sequence_count"], len(plan) if method == "qris" else 1)
+                    if method == "credit_card":
+                        body = pilot.DokuCheckoutClient.create_payment.call_args.args[0]
+                        self.assertEqual(body["order"]["amount"], total)
+                        self.assertIn("(1/1)", body["order"]["line_items"][0]["name"])
+
+    async def test_non_qris_collects_full_remaining_balance_after_partial_payment(self):
+        self.order.status = "partially_paid"
+        pilot.PaymentService._next_payment_segment.return_value = (2, 3, Decimal("9000000"))
+        pilot.PaymentService._payment_progress.return_value = (Decimal("9000000"), Decimal("18000000"))
+        for method in ("virtual_account", "credit_card"):
+            with self.subTest(method=method):
+                choice = pilot.DokuOrderChoice(method=method, bank_code="BCA" if method == "virtual_account" else None)
+                data = await pilot.create_payment(self.db, self.order.id, choice, self.user)
+                self.assertEqual(data["amount"], 18000000)
+                self.assertEqual(data["payment_sequence"], 2)
+                self.assertEqual(data["payment_sequence_count"], 2)
+                self.assertEqual(self.order.status, "partially_paid")
+
     async def test_disabled_channel_never_calls_gateway(self):
         pilot.capabilities.return_value["qris"] = False
         with self.assertRaises(ValidationException):
