@@ -8,6 +8,7 @@ from app.core.exceptions import ValidationException
 from app.core.security import create_access_token, create_refresh_token, hash_password, verify_password
 from app.modules.users import schemas
 from app.modules.users.repository import UserRepository
+from app.modules.users.purchase_progress import purchase_status
 
 
 class UserService:
@@ -16,6 +17,7 @@ class UserService:
         from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail, ExhibitorRegistration
         from app.modules.participants.models import ParticipantProfile
         from app.modules.payments.models import Order, Payment
+        from app.modules.payments.service import PaymentService
         from app.modules.registrations.models import Registration
         from app.modules.store.models import Cart, CartItem, OrderItem, Product
 
@@ -57,11 +59,17 @@ class UserService:
         order_data = []
         for order in orders:
             items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-            payment = (await db.execute(select(Payment).where(Payment.order_id == order.id).order_by(Payment.created_at.desc()))).scalars().first()
+            payment = (await db.execute(select(Payment).where(Payment.order_id == order.id, Payment.deleted_at.is_(None)).order_by(Payment.created_at.desc()))).scalars().first()
+            paid_amount, remaining_amount = await PaymentService._payment_progress(db, order)
             order_data.append({
                 "id": order.id,
                 "order_number": order.order_number,
                 "registration_id": order.registration_id,
+                "event_id": order.event_id,
+                "allowed_actions": order.allowed_actions,
+                "paid_amount": float(paid_amount),
+                "remaining_amount": float(remaining_amount),
+                "is_payment_complete": order.status == "paid" and remaining_amount == 0,
                 "status": order.status,
                 "subtotal": order.subtotal,
                 "total_amount": order.total_amount,
@@ -83,9 +91,11 @@ class UserService:
             if product.product_type in {"delegate", "exhibitor"}
         ]
         for order in order_data:
+            if order["status"] != "paid" and "continue_payment" not in order["allowed_actions"]:
+                continue
             for item in order["items"]:
                 if item["type"] in {"delegate", "exhibitor"}:
-                    selected_products.append({**item, "source": "order", "order_id": order["id"], "order_status": order["status"], "payment_status": order["payment"]["status"] if order["payment"] else None})
+                    selected_products.append({**item, "source": "order", "order_id": order["id"], "order_status": order["status"], "is_payment_complete": order["is_payment_complete"], "payment_status": order["payment"]["status"] if order["payment"] else None})
 
         selected_types = sorted(
             {row["type"] for row in registrations}
@@ -100,33 +110,25 @@ class UserService:
             delegate_status = "lengkap" if any(row["status"] in complete_delegate_statuses for row in delegate_rows) else "belum_lengkap"
         if exhibitor_rows:
             exhibitor_status = "lengkap" if any(row["status"] in {"submitted", "paid", "confirmed"} for row in exhibitor_rows) else "belum_lengkap"
-        effective_status = user.registration_status
-        if selected_types:
-            effective_status = "package_selected"
-        if any(order["status"] == "pending" for order in order_data):
-            effective_status = "payment_pending"
-        if any(order["payment"] and order["payment"]["status"] == "success" for order in order_data):
-            effective_status = "paid"
         tracking = {}
         for product_type, rows in (("delegate", delegate_rows), ("exhibitor", exhibitor_rows)):
             products = [product for product in selected_products if product["type"] == product_type]
-            paid = any(product.get("payment_status") == "success" for product in products)
             registered = any(row["type"] == product_type for row in registrations)
             complete = any(
                 row["status"] in (complete_delegate_statuses if product_type == "delegate" else {"submitted", "paid", "confirmed"})
                 for row in rows
             )
-            if complete:
-                state = "completed"
-            elif paid:
-                state = "paid_profile_incomplete"
-            elif any(product.get("order_status") == "pending" for product in products):
-                state = "payment_pending"
-            elif products or registered:
-                state = "selected"
-            else:
-                state = "not_selected"
+            state = purchase_status(products, registered=registered, complete=complete)
             tracking[product_type] = {"status": state, "products": products, "profile_required": state == "paid_profile_incomplete"}
+        states = {item["status"] for item in tracking.values()}
+        if "payment_pending" in states:
+            effective_status = "payment_pending"
+        elif "selected" in states:
+            effective_status = "package_selected"
+        elif states & {"completed", "paid_profile_incomplete"}:
+            effective_status = "paid"
+        else:
+            effective_status = "account_created"
         return {
             "user": schemas.UserRead.model_validate(user),
             "registration_status": effective_status,

@@ -47,10 +47,10 @@ class DokuCheckoutClient:
         if not self.settings.DOKU_CLIENT_ID or not self.settings.DOKU_SECRET_KEY:
             raise ValidationException("DOKU_NOT_CONFIGURED", "DOKU Client ID dan Secret Key belum dikonfigurasi")
 
-    async def create_payment(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    async def create_payment(self, payload: dict[str, Any], *, request_id: str | None = None) -> tuple[dict[str, Any], str]:
         self._credentials()
         body = canonical_json(payload)
-        request_id = str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         target = self.settings.DOKU_CHECKOUT_PATH
         headers = {

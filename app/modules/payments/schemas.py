@@ -232,6 +232,7 @@ class PaymentRead(BaseModel):
     transaction_status: str
     fraud_status: str | None = None
     paid_at: datetime | None = None
+    expired_at: datetime | None = None
     checkout_url: str | None = None
     channel_code: str | None = None
     virtual_account_no: str | None = None

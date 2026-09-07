@@ -131,7 +131,7 @@ class ResumableOrderServiceTests(unittest.IsolatedAsyncioTestCase):
         create_checkout.assert_awaited_once()
         session.flush.assert_awaited_once()
 
-    async def test_failed_doku_webhook_keeps_order_payable(self):
+    async def test_failed_doku_checkout_webhook_keeps_same_attempt_payable(self):
         order = make_order(OrderStatus.PENDING)
         payment = Payment(
             id=uuid.uuid4(), order_id=order.id, provider="doku", gross_amount=100000,
@@ -161,7 +161,7 @@ class ResumableOrderServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("failed", result)
         self.assertEqual(OrderStatus.PENDING, order.status)
-        self.assertEqual(PaymentStatus.FAILED, payment.transaction_status)
+        self.assertEqual(PaymentStatus.PENDING, payment.transaction_status)
         session.commit.assert_awaited_once()
 
 

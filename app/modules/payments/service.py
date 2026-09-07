@@ -980,6 +980,30 @@ class PaymentService:
                 asyncio.create_task(deliver_payment_for_order(order.id))
         return {"responseCode": "2005400", "responseMessage": "Successful", "partnerReferenceNo": reference, "additionalInfo": {}}
     @staticmethod
+    def _is_doku_checkout(payment: Payment) -> bool:
+        # Null identifies hosted checkouts created before the explicit marker.
+        return (payment.provider == "doku" and not payment.virtual_account_no
+                and payment.payment_type in {None, "doku_checkout", "CREDIT_CARD"})
+
+    @staticmethod
+    async def _next_doku_checkout_segment(session: AsyncSession, order: Order, payments: list[Payment]) -> tuple[int, int, Decimal]:
+        _, remaining = await PaymentService._payment_progress(session, order)
+        configured_limit = Decimal(str(get_settings().QRIS_SEGMENT_LIMIT_IDR))
+        if not configured_limit.is_finite() or configured_limit <= 0:
+            raise ValidationException("INVALID_PAYMENT_LIMIT", "Batas pembayaran tidak valid")
+        limit = min(configured_limit, Decimal("9000000"))
+        if not remaining.is_finite() or remaining <= 0:
+            raise ConflictException("ORDER_ALREADY_PAID", "Order sudah lunas")
+        if remaining != remaining.to_integral_value() or limit != limit.to_integral_value():
+            raise ValidationException("DOKU_INTEGER_AMOUNT_REQUIRED", "Nominal DOKU harus berupa Rupiah bulat")
+        # Legacy payments can have different amounts or no sequence. Use settled
+        # money, not the original plan's indexes, to avoid overcharging the balance.
+        sequence = max((item.payment_sequence or 0 for item in payments
+                        if item.transaction_status == PaymentStatus.SUCCESS), default=0) + 1
+        count = sequence - 1 + int((remaining + limit - 1) // limit)
+        return sequence, count, min(limit, remaining)
+
+    @staticmethod
     async def create_doku_checkout(
         session: AsyncSession,
         payload: schemas.CreateDokuCheckoutRequest,
@@ -988,7 +1012,7 @@ class PaymentService:
         registrations = await PaymentRepository.get_registrations_for_user(session, user_id)
         registration = None
         if payload.order_id is not None:
-            latest_order = await PaymentRepository.get_order_for_user(session, payload.order_id, user_id)
+            latest_order = await PaymentRepository.get_order_for_user(session, payload.order_id, user_id, lock=True)
             if latest_order is None:
                 raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
             if latest_order.status == OrderStatus.PAID:
@@ -1024,7 +1048,14 @@ class PaymentService:
             )
 
         if payload.order_id is None:
+            # Serialize legacy checkout even before an order exists. Locking the
+            # user avoids reversing webhook's order -> registration lock order.
+            # NO KEY UPDATE still permits FK checks when webhook notifications
+            # reference this user, unlike an exclusive FOR UPDATE lock.
+            await session.get(User, user_id, with_for_update={"key_share": True})
             latest_order = await PaymentRepository.get_latest_order(session, registration.id)
+            if latest_order:
+                latest_order = await PaymentRepository.get_order_for_user(session, latest_order.id, user_id, lock=True)
         if latest_order and latest_order.status == OrderStatus.PAID:
             latest_payment = await PaymentRepository.get_payment_by_order(session, latest_order.id)
             payment_id = latest_payment.id if latest_payment else None
@@ -1039,41 +1070,43 @@ class PaymentService:
                 latest_order,
             )
 
-        if latest_order and latest_order.status in [OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT]:
-            sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, latest_order)
-            payment = (await session.execute(select(Payment).where(
-                Payment.order_id == latest_order.id,
-                Payment.provider == "doku",
-                Payment.payment_sequence == sequence,
-                Payment.deleted_at.is_(None),
-            ).order_by(Payment.created_at.desc()))).scalars().first()
-            reusable_url = PaymentService._reusable_doku_checkout_url(payment)
-            if reusable_url:
-                paid, remaining = await PaymentService._payment_progress(session, latest_order)
-                return (schemas.DokuCheckoutResponse(payment_url=reusable_url, expires_at=payment.expired_at, already_paid=False, payment_id=payment.id, order_status=latest_order.status, requires_payment=True, payment_sequence=sequence, payment_sequence_count=sequence_count, payment_amount=float(segment_amount), paid_amount=float(paid), remaining_amount=float(remaining)), latest_order)
-            if payment and (
-                payment.checkout_url
-                or payment.transaction_status not in {PaymentStatus.CREATED, PaymentStatus.PENDING}
-            ):
-                if payment.transaction_status in {PaymentStatus.CREATED, PaymentStatus.PENDING}:
-                    payment.transaction_status = PaymentStatus.EXPIRED
-                    payment.expired_at = payment.expired_at or datetime.now(timezone.utc)
-                payment = None
-            if not payment:
-                payment = Payment(
-                    order_id=latest_order.id, provider="doku",
-                    gross_amount=segment_amount, currency=latest_order.currency,
-                    payment_sequence=sequence, payment_sequence_count=sequence_count,
-                    transaction_status=PaymentStatus.CREATED,
-                )
-                session.add(payment)
-                await session.flush()
-        else:
+        if latest_order is None:
             latest_order = await PaymentRepository.create_order(session, registration.id)
-            sequence, sequence_count, segment_amount = await PaymentService._next_payment_segment(session, latest_order)
-            payment = Payment(order_id=latest_order.id, provider="doku", gross_amount=segment_amount, currency=latest_order.currency, payment_sequence=sequence, payment_sequence_count=sequence_count, transaction_status=PaymentStatus.CREATED)
-            session.add(payment)
-            await session.flush()
+        if latest_order.status not in {OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID, OrderStatus.DRAFT}:
+            raise ConflictException("ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
+        if latest_order.currency.upper() != "IDR":
+            raise ValidationException("DOKU_IDR_REQUIRED", "DOKU hanya menerima tagihan IDR")
+        now = datetime.now(timezone.utc)
+        payments = await PaymentRepository.get_payments_by_order(session, latest_order.id)
+        active = [item for item in payments if item.transaction_status not in {
+            PaymentStatus.SUCCESS, PaymentStatus.FAILED, PaymentStatus.EXPIRED, PaymentStatus.CANCELED,
+        }]
+        if active:
+            # Any provider/method blocks a second bill, including legacy direct VA/QRIS.
+            payment = active[0]
+            reusable_url = PaymentService._reusable_doku_checkout_url(payment) if (
+                len(active) == 1 and PaymentService._is_doku_checkout(payment)
+            ) else ""
+            if not reusable_url:
+                raise ConflictException("PAYMENT_AWAITING_RECONCILIATION", "Pembayaran aktif masih menunggu konfirmasi. Periksa status pembayaran sebelum membuat tagihan baru.")
+            paid, remaining = await PaymentService._payment_progress(session, latest_order)
+            return (schemas.DokuCheckoutResponse(
+                payment_url=reusable_url, expires_at=payment.expired_at, payment_id=payment.id,
+                order_status=latest_order.status, payment_sequence=payment.payment_sequence,
+                payment_sequence_count=payment.payment_sequence_count,
+                payment_amount=float(payment.gross_amount), paid_amount=float(paid), remaining_amount=float(remaining),
+            ), latest_order)
+        expires = latest_order.expires_at
+        if expires and expires.replace(tzinfo=expires.tzinfo or timezone.utc) <= now:
+            raise ConflictException("ORDER_EXPIRED", "Order sudah kedaluwarsa")
+        sequence, sequence_count, segment_amount = await PaymentService._next_doku_checkout_segment(session, latest_order, payments)
+        payment = Payment(
+            order_id=latest_order.id, provider="doku", payment_type="doku_checkout",
+            gross_amount=segment_amount, currency="IDR", payment_sequence=sequence,
+            payment_sequence_count=sequence_count, transaction_status=PaymentStatus.CREATED,
+        )
+        session.add(payment)
+        await session.flush()
 
         participant = await session.get(ParticipantProfile, registration.participant_id) if registration else None
         user = await session.get(User, participant.user_id) if participant else await session.get(User, user_id)
@@ -1088,8 +1121,6 @@ class PaymentService:
             raise ValidationException("PAYMENT_DATA_INCOMPLETE", "Data user atau event tidak lengkap")
         customer_name = participant.full_name if participant else (user.full_name or user.email)
         customer_id = str(participant.id) if participant else str(user.id)
-        from app.modules.store.models import OrderItem
-        order_items = list((await session.execute(select(OrderItem).where(OrderItem.order_id == latest_order.id))).scalars())
         amount = float(payment.gross_amount)
         if amount.is_integer(): amount = int(amount)
         provider_invoice = f"{latest_order.order_number}-P{payment.payment_sequence:02d}-{uuid.uuid4().hex[:6].upper()}"
@@ -1106,29 +1137,42 @@ class PaymentService:
             "customer": {"id": customer_id, "name": customer_name, "email": user.email, "phone": user.phone or ""},
             "additional_info": {"event_id": str(event.id), "registration_id": str(registration.id) if registration else "", "order_id": str(latest_order.id)},
         }
-        response, request_id = await DokuCheckoutClient().create_payment(request_body)
+        client = DokuCheckoutClient()
+        client._credentials()  # Fail configuration checks before reserving an attempt.
+        request_id = str(uuid.uuid4())
+        payment.provider_order_id = provider_invoice
+        payment.provider_transaction_id = request_id
+        payment.external_id = request_id
+        payment.expired_at = now + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)
+        if latest_order.status == OrderStatus.DRAFT:
+            latest_order.status = OrderStatus.PENDING
+        # Make the invoice visible to webhooks and competing checkout requests BEFORE
+        # external I/O. On timeout, retain CREATED until provider reconciliation.
+        await session.commit()
+        response, _ = await client.create_payment(request_body, request_id=request_id)
         response_payment = response.get("response", {}).get("payment", response.get("payment", {}))
         payment_url = response_payment.get("url")
         if not payment_url:
             raise ValidationException("DOKU_PAYMENT_URL_MISSING", "DOKU tidak mengembalikan payment URL")
-        payment.provider = "doku"
-        payment.provider_transaction_id = request_id
-        payment.provider_order_id = provider_invoice
+        # A verified webhook may have settled this invoice during the HTTP call.
+        await session.refresh(payment, with_for_update=True)
         payment.checkout_url = payment_url
-        payment.raw_response = json.dumps(response)
-        payment.transaction_status = PaymentStatus.PENDING
-        payment.expired_at = datetime.now(timezone.utc) + timedelta(minutes=get_settings().DOKU_PAYMENT_DUE_MINUTES)
-        await session.commit(); await session.refresh(payment)
+        if payment.transaction_status == PaymentStatus.CREATED:
+            payment.raw_response = json.dumps(response)
+            payment.transaction_status = PaymentStatus.PENDING
+        await session.commit()
+        await session.refresh(payment)
+        await session.refresh(latest_order)
         paid, remaining = await PaymentService._payment_progress(session, latest_order)
         return (
             schemas.DokuCheckoutResponse(
-                payment_url=payment_url,
+                payment_url=payment_url if payment.transaction_status == PaymentStatus.PENDING else "",
                 token=response_payment.get("token_id"),
                 expires_at=payment.expired_at,
-                already_paid=False,
+                already_paid=latest_order.status == OrderStatus.PAID,
                 payment_id=payment.id,
                 order_status=latest_order.status,
-                requires_payment=True,
+                requires_payment=latest_order.status != OrderStatus.PAID,
                 payment_sequence=payment.payment_sequence,
                 payment_sequence_count=payment.payment_sequence_count,
                 payment_amount=float(payment.gross_amount),
@@ -1601,20 +1645,26 @@ class PaymentService:
         status = str(transaction.get("status") or payload.get("payment", {}).get("status") or "").upper()
         if not order_number or not status:
             raise ValidationException("DOKU_INVALID_PAYLOAD", "Invoice number dan transaction status wajib ada")
-        payment = await PaymentRepository.get_payment_by_provider_order_id(session, order_number, lock=True, provider="doku")
+        payment = await PaymentRepository.get_payment_by_provider_order_id(session, order_number, provider="doku")
         if not payment:
             raise NotFoundException("DOKU_PAYMENT_NOT_FOUND", "Payment DOKU tidak ditemukan")
         order = await session.get(Order, payment.order_id, with_for_update=True)
         if not order:
             raise NotFoundException("DOKU_ORDER_NOT_FOUND", "Order DOKU tidak ditemukan")
+        # Match checkout/resume/cancel lock order, then reload after waiting.
+        await session.refresh(payment, with_for_update=True)
         if await PaymentRepository.get_webhook_event(session, request_id):
             return "already_processed"
         notified_amount = Decimal(str(order_data.get("amount")))
         if notified_amount != Decimal(str(payment.gross_amount)):
             raise ValidationException("DOKU_AMOUNT_MISMATCH", "Nominal notifikasi DOKU tidak sesuai bagian pembayaran")
-        if status == "SUCCESS":
+        if payment.transaction_status == PaymentStatus.SUCCESS:
+            pass
+        elif status == "SUCCESS":
             payment.transaction_status = PaymentStatus.SUCCESS
             payment.paid_at = datetime.now(timezone.utc)
+        elif PaymentService._is_doku_checkout(payment) and status in {"FAILED", "TIMEOUT", "REDIRECT", "PENDING"}:
+            payment.transaction_status = PaymentStatus.PENDING
         elif status in {"FAILED", "CANCELLED", "CANCELED"}:
             payment.transaction_status = PaymentStatus.FAILED
         elif status == "EXPIRED":
