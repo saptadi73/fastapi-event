@@ -14,6 +14,8 @@ from app.modules.events.models import Event
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
 from app.modules.payments.models import Order, Payment, PaymentProof, PaymentStatus, payment_allowed_actions
 from app.modules.registrations.models import Registration
+from app.modules.participants.models import ParticipantProfile
+from app.modules.users.models import User
 from app.modules.store.models import OrderItem, Product
 
 
@@ -47,6 +49,8 @@ class PaymentReportingService:
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
+        registration_user = aliased(User, name="registration_user")
+        order_user = aliased(User, name="order_user")
         store_product = aliased(Product)
         store_package = aliased(DelegatePackage)
         purchased_event_id = (
@@ -103,8 +107,17 @@ class PaymentReportingService:
                 Registration.registration_number,
                 effective_event_id.label("event_id"),
                 Event.name.label("event_name"),
-                DelegateRegistrationDetail.full_name.label("customer_name"),
-                DelegateRegistrationDetail.email.label("customer_email"),
+                func.coalesce(
+                    func.nullif(func.trim(DelegateRegistrationDetail.full_name), ""),
+                    func.nullif(func.trim(ParticipantProfile.full_name), ""),
+                    func.nullif(func.trim(registration_user.full_name), ""),
+                    func.nullif(func.trim(order_user.full_name), ""),
+                ).label("customer_name"),
+                func.coalesce(
+                    func.nullif(func.trim(DelegateRegistrationDetail.email), ""),
+                    func.nullif(func.trim(registration_user.email), ""),
+                    func.nullif(func.trim(order_user.email), ""),
+                ).label("customer_email"),
                 DelegatePackage.id.label("package_id"),
                 DelegatePackage.code.label("package_code"),
                 DelegatePackage.name.label("package_name"),
@@ -112,6 +125,10 @@ class PaymentReportingService:
             .join(Order, Payment.order_id == Order.id)
             # Store-first payments can complete before a registration exists.
             .outerjoin(Registration, Order.registration_id == Registration.id)
+            # Prefer the registered participant; store-first orders still have an owner.
+            .outerjoin(ParticipantProfile, ParticipantProfile.id == Registration.participant_id)
+            .outerjoin(registration_user, registration_user.id == ParticipantProfile.user_id)
+            .outerjoin(order_user, order_user.id == Order.user_id)
             .outerjoin(Event, effective_event_id == Event.id)
             .outerjoin(
                 DelegateRegistrationDetail,

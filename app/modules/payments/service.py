@@ -17,7 +17,8 @@ from app.modules.payments.models import DirectDebitBinding, Order, OrderKind, Or
 from app.modules.payments.repository import PaymentRepository
 from app.modules.events.models import Event
 from app.modules.participants.models import ParticipantProfile
-from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
+from app.modules.iwbif.models import DelegatePackage, DelegatePackageRate, DelegateRegistrationDetail
+from app.modules.store.models import Product
 from app.modules.users.models import User
 from app.core.config import get_settings
 from app.core.exceptions import AppException, ConflictException, NotFoundException, ValidationException
@@ -1335,13 +1336,51 @@ class PaymentService:
         items = list((await session.execute(
             select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)
         )).scalars().all())
+
+        # Pending orders may contain a product-name snapshot from before an
+        # organizer renamed the package. Resolve the current catalog name for
+        # unpaid orders while preserving paid invoices as historical records.
+        current_names: dict[uuid.UUID, str] = {}
+        if order.status in {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID}:
+            product_ids = [item.product_id for item in items if item.product_id]
+            if product_ids:
+                products = (await session.execute(
+                    select(Product.id, Product.name).where(Product.id.in_(product_ids))
+                )).all()
+                current_names.update({product_id: name for product_id, name in products if name})
+
+            rate_ids = []
+            for item in items:
+                rate_id = (item.metadata_json or {}).get("delegate_package_rate_id")
+                if rate_id:
+                    try:
+                        rate_ids.append(uuid.UUID(str(rate_id)))
+                    except (TypeError, ValueError):
+                        continue
+            if rate_ids:
+                rates = (await session.execute(
+                    select(DelegatePackageRate.id, DelegatePackage.name, DelegatePackageRate.name)
+                    .join(DelegatePackage, DelegatePackage.id == DelegatePackageRate.delegate_package_id)
+                    .where(DelegatePackageRate.id.in_(rate_ids))
+                )).all()
+                current_names.update({rate_id: f"{package_name} - {rate_name}" for rate_id, package_name, rate_name in rates})
+
+        def display_name(item: OrderItem) -> str:
+            if item.product_id in current_names:
+                return current_names[item.product_id]
+            rate_id = (item.metadata_json or {}).get("delegate_package_rate_id")
+            try:
+                return current_names.get(uuid.UUID(str(rate_id)), item.product_name)
+            except (TypeError, ValueError):
+                return item.product_name
+
         payments = await PaymentRepository.get_payments_by_order(session, order.id)
         paid_amount, remaining_amount = await PaymentService._payment_progress(session, order)
         return schemas.UserOrderDetail(
             order=schemas.OrderRead.model_validate(order),
             items=[schemas.OrderItemRead(
                 id=item.id, product_id=item.product_id,
-                product_code=item.product_code, product_name=item.product_name,
+                product_code=item.product_code, product_name=display_name(item),
                 product_type=item.product_type, quantity=item.quantity,
                 unit_price=float(item.unit_price), currency=item.currency,
                 line_total=float(item.line_total), metadata=dict(item.metadata_json or {}),

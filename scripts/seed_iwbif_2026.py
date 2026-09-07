@@ -55,7 +55,7 @@ def to_idr(usd_amount: Decimal) -> Decimal:
     return usd_amount * USD_TO_IDR
 
 
-PACKAGES = [("A", "Package A - USD500", Decimal("500"), to_idr(Decimal("500"))), ("B", "Package B - USD400", Decimal("400"), to_idr(Decimal("400"))), ("C", "Package C - USD370", Decimal("370"), to_idr(Decimal("370")))]
+PACKAGES = [("A", "Main Package A", Decimal("500"), to_idr(Decimal("500"))), ("B", "Main Package B", Decimal("400"), to_idr(Decimal("400"))), ("C", "Main Package C", Decimal("370"), to_idr(Decimal("370")))]
 PROFILE_SLOTS = [(date(2026, 10, 15), time(9), time(12), "15 Oct Morning"), (date(2026, 10, 15), time(13), time(17), "15 Oct Afternoon"), (date(2026, 10, 16), time(9), time(12), "16 Oct Morning"), (date(2026, 10, 16), time(13), time(17), "16 Oct Afternoon")]
 
 DELEGATES = [
@@ -162,7 +162,7 @@ async def seed():
         base_packages = seed_packages or PACKAGES
 
         fallback_idr = {code: payment_amount_idr for code, _, _, payment_amount_idr in PACKAGES}
-        excel_prices = {"A": ("Package A - USD500", Decimal("500"), to_idr(Decimal("500"))), "B": ("Package B - USD400", Decimal("400"), to_idr(Decimal("400")))}
+        excel_prices = {"A": ("Main Package A", Decimal("500"), to_idr(Decimal("500"))), "B": ("Main Package B", Decimal("400"), to_idr(Decimal("400")))}
         for package_spec in base_packages:
             code, name, amount, payment_amount_idr = package_spec
             if code in excel_prices: name, amount, payment_amount_idr = excel_prices[code]
