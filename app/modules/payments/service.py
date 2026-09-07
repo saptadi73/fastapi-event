@@ -1385,13 +1385,21 @@ class PaymentService:
         # organizer renamed the package. Resolve the current catalog name for
         # unpaid orders while preserving paid invoices as historical records.
         current_names: dict[uuid.UUID, str] = {}
-        if order.status in {OrderStatus.DRAFT, OrderStatus.PENDING, OrderStatus.PARTIALLY_PAID}:
+        rate_names: dict[uuid.UUID, str] = {}
+        if "continue_payment" in order.allowed_actions:
             product_ids = [item.product_id for item in items if item.product_id]
             if product_ids:
                 products = (await session.execute(
-                    select(Product.id, Product.name).where(Product.id.in_(product_ids))
+                    select(Product.id, Product.name, DelegatePackage.name, DelegatePackageRate.name)
+                    .outerjoin(DelegatePackageRate, DelegatePackageRate.id == Product.delegate_package_rate_id)
+                    .outerjoin(DelegatePackage, DelegatePackage.id == DelegatePackageRate.delegate_package_id)
+                    .where(Product.id.in_(product_ids))
                 )).all()
-                current_names.update({product_id: name for product_id, name in products if name})
+                current_names.update({
+                    product_id: f"{package_name} - {rate_name}" if package_name and rate_name else name
+                    for product_id, name, package_name, rate_name in products
+                    if (package_name and rate_name) or name
+                })
 
             rate_ids = []
             for item in items:
@@ -1407,16 +1415,15 @@ class PaymentService:
                     .join(DelegatePackage, DelegatePackage.id == DelegatePackageRate.delegate_package_id)
                     .where(DelegatePackageRate.id.in_(rate_ids))
                 )).all()
-                current_names.update({rate_id: f"{package_name} - {rate_name}" for rate_id, package_name, rate_name in rates})
+                rate_names.update({rate_id: f"{package_name} - {rate_name}" for rate_id, package_name, rate_name in rates})
 
         def display_name(item: OrderItem) -> str:
-            if item.product_id in current_names:
-                return current_names[item.product_id]
             rate_id = (item.metadata_json or {}).get("delegate_package_rate_id")
             try:
-                return current_names.get(uuid.UUID(str(rate_id)), item.product_name)
+                rate_name = rate_names.get(uuid.UUID(str(rate_id)))
             except (TypeError, ValueError):
-                return item.product_name
+                rate_name = None
+            return rate_name or current_names.get(item.product_id) or item.product_name
 
         payments = await PaymentRepository.get_payments_by_order(session, order.id)
         paid_amount, remaining_amount = await PaymentService._payment_progress(session, order)
