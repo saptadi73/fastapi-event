@@ -150,8 +150,10 @@ class ParticipantReportingService:
                         purchases.append(record)
 
             if purchases or not any((event_id, package_id, normalized_status)):
+                registration_id = next((purchase.get("registration_id") for purchase in purchases if purchase.get("registration_id")), None)
                 result.append({
                     "participant_id": str(participant.id),
+                    "registration_id": registration_id,
                     "user_id": str(user.id),
                     "full_name": participant.full_name,
                     "email": user.email,
@@ -177,6 +179,7 @@ class ParticipantReportingService:
         unit_price = item.unit_price if item else order.total_amount
         line_total = item.line_total if item else order.total_amount
         return {
+            "registration_id": str(order.registration_id) if order.registration_id else None,
             "event_id": str(event_id) if event_id else None,
             "package_id": str(package.id) if package else None,
             "package_code": package.code if package else (item.product_code if item else None),
@@ -199,7 +202,7 @@ class ParticipantReportingService:
     def csv(rows: list[dict]) -> str:
         output = io.StringIO(newline="")
         columns = [
-            "participant_id", "full_name", "email", "phone", "country", "organization_name",
+            "participant_id", "registration_id", "full_name", "email", "phone", "country", "organization_name",
             "event_id", "package_id", "package_code", "package_name", "package_type", "quantity",
             "unit_price", "line_total", "currency", "order_id", "order_number", "order_status",
             "payment_id", "payment_status", "payment_provider", "paid_at",

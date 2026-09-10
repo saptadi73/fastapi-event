@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,11 +29,11 @@ async def me(
 @router.get("/users/{user_id}", summary="Get complete user registration detail")
 async def user_detail(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    if str(current_user.id) != user_id and current_user.role not in {"admin", "organizer"}:
+    if str(current_user.id) != str(user_id) and current_user.role not in {"admin", "organizer"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User detail hanya dapat dilihat oleh pemilik atau organizer")
     data = await UserService.get_registration_detail(db, user_id)
     return success_response("Detail user dan registrasi berhasil diambil", data=data, request=request)
