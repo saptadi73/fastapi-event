@@ -2076,6 +2076,7 @@ Contoh response participant dengan lebih dari satu package:
 ```json
 {
   "participant_id": "participant-uuid",
+  "registration_id": "registration-uuid",
   "user_id": "user-uuid",
   "full_name": "Participant Example",
   "email": "participant@example.com",
@@ -2087,6 +2088,7 @@ Contoh response participant dengan lebih dari satu package:
     {
       "event_id": "event-uuid",
       "package_id": "package-a-uuid",
+      "registration_id": "registration-uuid",
       "package_code": "A",
       "package_name": "Package A",
       "package_type": "delegate",
@@ -2105,6 +2107,7 @@ Contoh response participant dengan lebih dari satu package:
     {
       "event_id": "event-uuid",
       "package_id": "package-c-uuid",
+      "registration_id": "registration-uuid",
       "package_code": "C",
       "package_name": "Package C",
       "package_type": "delegate",
@@ -2123,6 +2126,27 @@ Contoh response participant dengan lebih dari satu package:
   ]
 }
 ```
+
+Kontrak `registration_id` untuk form Manual Payments:
+
+- `data[].registration_id`: UUID string atau `null`, diambil dari
+  `registration_id` pertama yang tidak `null` dalam `packages` hasil filter.
+- `data[].packages[].registration_id`: UUID string dari registrasi yang terhubung
+  ke order pembelian tersebut, atau `null` jika order belum terhubung ke registrasi.
+- Field ini bukan `participant_id` maupun `user_id`. Gunakan UUID registrasi untuk
+  `POST /api/v1/admin/registrations/{registration_id}/offline-payments`.
+- Nilai tingkat participant dapat `null` ketika tidak ada pembelian yang
+  dikembalikan dengan relasi registrasi. Ini tidak membuktikan participant belum
+  memiliki registrasi; laporan mengambil relasi dari order.
+- Jika terdapat beberapa registrasi, pilih registrasi yang sesuai dengan event
+  dan pembelian tujuan. Nilai tingkat participant adalah ringkasan pertama,
+  bukan penanda registrasi terbaru atau yang masih harus dibayar.
+
+Kolom `registration_id` juga tersedia di CSV. Baris package memakai relasi
+registrasi order masing-masing, sehingga nilainya dapat kosong.
+
+Untuk alur pencarian dan penanganan nilai `null`, lihat
+[Offline Registration Payment](OFFLINE_REGISTRATION_PAYMENT.md#participant-search-for-manual-payments).
 
 `payment_status` melekat pada payment terakhir dari order package tersebut,
 bukan status global participant. Karena itu satu participant dapat mempunyai

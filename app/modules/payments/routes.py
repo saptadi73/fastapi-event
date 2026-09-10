@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.support.search import pagination_meta, resolve_pagination
 from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.modules.users.models import User
 from app.support.responses import success_response
@@ -460,6 +461,7 @@ async def _payment_report_rows(
     package_id: uuid.UUID | None,
     provider: str | None = "doku",
     include_deleted: bool = False,
+    search: str | None = None,
 ):
     if date_from and date_to and date_from > date_to:
         raise ValidationException("INVALID_REPORT_PERIOD", "date_from tidak boleh sesudah date_to")
@@ -476,6 +478,7 @@ async def _payment_report_rows(
         package_id=package_id,
         provider=provider,
         include_deleted=include_deleted,
+        search=search,
     )
 
 
@@ -489,20 +492,24 @@ async def admin_all_transactions(
     provider: str | None = Query(default=None),
     channel_code: str | None = Query(default=None),
     package_id: uuid.UUID | None = Query(default=None),
+    search: str | None = None,
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     include_deleted: bool = Query(default=False),
     organizer: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
+    page, limit, offset = resolve_pagination(page, size, limit, offset)
     rows = await _payment_report_rows(
         db, event_id, date_from, date_to, status, channel_code, package_id,
-        provider.strip().lower() if provider else None, include_deleted,
+        provider.strip().lower() if provider else None, include_deleted, search=search,
     )
     return success_response(
         "Semua transaksi pembayaran berhasil diambil",
         data=PaymentReportingService.build_report(rows, limit=limit, offset=offset),
-        meta={"total": len(rows), "limit": limit, "offset": offset},
+        meta={**pagination_meta(page, limit, len(rows)), "limit": limit, "offset": offset},
         request=request,
     )
 
@@ -589,16 +596,20 @@ async def admin_midtrans_payment_report(
     status: str | None = Query(default=None),
     channel_code: str | None = Query(default=None),
     package_id: uuid.UUID | None = Query(default=None),
+    search: str | None = None,
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "midtrans")
+    page, limit, offset = resolve_pagination(page, size, limit, offset)
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, "midtrans", search=search)
     return success_response(
         "Laporan pembayaran Midtrans berhasil diambil",
         data=PaymentReportingService.build_report(rows, limit=limit, offset=offset),
-        meta={"total": len(rows), "limit": limit, "offset": offset}, request=request,
+        meta={**pagination_meta(page, limit, len(rows)), "limit": limit, "offset": offset}, request=request,
     )
 
 
@@ -668,17 +679,21 @@ async def admin_payment_report(
     status: str | None = Query(default=None),
     channel_code: str | None = Query(default=None),
     package_id: uuid.UUID | None = Query(default=None),
+    search: str | None = None,
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id)
+    page, limit, offset = resolve_pagination(page, size, limit, offset)
+    rows = await _payment_report_rows(db, event_id, date_from, date_to, status, channel_code, package_id, search=search)
     data = PaymentReportingService.build_report(rows, limit=limit, offset=offset)
     return success_response(
         "Laporan pembayaran DOKU berhasil diambil",
         data=data,
-        meta={"total": len(rows), "limit": limit, "offset": offset},
+        meta={**pagination_meta(page, limit, len(rows)), "limit": limit, "offset": offset},
         request=request,
     )
 

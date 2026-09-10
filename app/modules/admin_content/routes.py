@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import paginate_query
 from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.core.exceptions import NotFoundException
 from app.modules.admin_content import schemas
@@ -12,7 +13,7 @@ from app.modules.admin_content.models import Announcement, Certificate
 from app.modules.users.models import User
 from app.support.responses import success_response
 from app.core.i18n import request_locale
-from app.modules.content_translations.service import localize_models
+from app.modules.content_translations.service import localize_models, translated_search_filter
 
 router = APIRouter(tags=["admin-content"])
 
@@ -25,9 +26,10 @@ async def list_announcements(event_id: UUID, request: Request, db: AsyncSession 
 
 
 @router.get("/admin/events/{event_id}/announcements")
-async def admin_announcements(event_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
-    rows = (await db.execute(select(Announcement).where(Announcement.event_id == event_id).order_by(Announcement.created_at.desc()))).scalars().all()
-    return success_response("Announcement admin ditemukan", [schemas.AnnouncementRead.model_validate(row) for row in rows], request=request)
+async def admin_announcements(event_id: UUID, request: Request, search: str | None = None, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100), admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    stmt = select(Announcement).where(Announcement.event_id == event_id, translated_search_filter(search, "announcement", Announcement.id, Announcement.title, Announcement.body, Announcement.status)).order_by(Announcement.created_at.desc(), Announcement.id)
+    rows, meta = await paginate_query(db, stmt, page, size)
+    return success_response("Announcement admin ditemukan", [schemas.AnnouncementRead.model_validate(row) for row in rows], meta=meta, request=request)
 
 
 @router.post("/admin/events/{event_id}/announcements", status_code=201)
@@ -66,9 +68,10 @@ async def my_certificates(request: Request, user: User = Depends(get_current_use
 
 
 @router.get("/admin/events/{event_id}/certificates")
-async def admin_certificates(event_id: UUID, request: Request, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
-    rows = (await db.execute(select(Certificate).where(Certificate.event_id == event_id).order_by(Certificate.issued_at.desc()))).scalars().all()
-    return success_response("Certificate admin ditemukan", [schemas.CertificateRead.model_validate(row) for row in rows], request=request)
+async def admin_certificates(event_id: UUID, request: Request, search: str | None = None, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100), admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    stmt = select(Certificate).join(User, User.id == Certificate.user_id).where(Certificate.event_id == event_id, translated_search_filter(search, "certificate", Certificate.id, Certificate.certificate_number, Certificate.title, User.full_name, User.email)).order_by(Certificate.issued_at.desc(), Certificate.id)
+    rows, meta = await paginate_query(db, stmt, page, size)
+    return success_response("Certificate admin ditemukan", [schemas.CertificateRead.model_validate(row) for row in rows], meta=meta, request=request)
 
 
 @router.post("/admin/certificates", status_code=201)

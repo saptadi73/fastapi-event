@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import search_filter
 from app.core.exceptions import NotFoundException
 from app.modules.check_ins.models import CheckIn
 from app.modules.participants.models import ParticipantProfile
@@ -34,8 +35,15 @@ class AttendanceRepository:
         session: AsyncSession,
         event_id: UUID,
         include_without_ticket: bool = True,
+        search: str | None = None,
     ):
         stmt = AttendanceRepository._build_attendee_query(event_id)
+        stmt = stmt.where(search_filter(
+            search, ParticipantProfile.full_name, Registration.registration_number,
+            Ticket.ticket_number, ParticipantProfile.organization_name, CheckIn.gate_name,
+            Registration.status, Ticket.status, CheckIn.status,
+            case((CheckIn.id.is_not(None), "checked_in"), else_="not_checked_in"),
+        ))
         if not include_without_ticket:
             stmt = stmt.where(Ticket.id.is_not(None))
         result = await session.execute(stmt)
@@ -76,7 +84,7 @@ class AttendanceRepository:
                 Registration.status != RegistrationStatus.CANCELED,
                 Registration.status != RegistrationStatus.CANCELLED,
             )
-            .order_by(Registration.registration_number.asc(), ParticipantProfile.full_name.asc())
+            .order_by(Registration.registration_number.asc(), ParticipantProfile.full_name.asc(), Registration.id, Ticket.id, CheckIn.id)
         )
 
     @staticmethod

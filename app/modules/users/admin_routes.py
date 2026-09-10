@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import search_filter
 from app.core.dependencies import get_db_session, require_admin
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
 from app.core.security import hash_password
@@ -21,14 +22,14 @@ def ensure_role_authority(actor: User, target_role: str, target: User | None = N
 
 
 @router.get("")
-async def list_users(request: Request, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100), role: str | None = None, status: str | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
-    filters = []
+async def list_users(request: Request, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100), search: str | None = None, role: str | None = None, status: str | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+    filters = [search_filter(search, User.full_name, User.email, User.phone, User.country)]
     if role: filters.append(User.role == role)
     if status: filters.append(User.status == status)
-    stmt = select(User).where(*filters).order_by(User.created_at.desc()).offset((page - 1) * size).limit(size)
+    stmt = select(User).where(*filters).order_by(User.created_at.desc(), User.id).offset((page - 1) * size).limit(size)
     rows = (await db.execute(stmt)).scalars().all()
     total = int((await db.scalar(select(func.count()).select_from(User).where(*filters))) or 0)
-    return success_response("Daftar user ditemukan", [schemas.UserRead.model_validate(row) for row in rows], meta={"page": page, "size": size, "total": total, "pages": max((total + size - 1) // size, 1)}, request=request)
+    return success_response("Daftar user ditemukan", [schemas.UserRead.model_validate(row) for row in rows], meta={"page": page, "size": size, "total": total, "pages": (total + size - 1) // size}, request=request)
 
 
 @router.post("", status_code=201)

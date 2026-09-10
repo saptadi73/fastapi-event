@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import pagination_meta
 from app.core.dependencies import get_db_session, require_admin
 from app.modules.attendance import schemas, service
 from app.modules.check_ins import schemas as check_in_schemas
@@ -47,6 +48,9 @@ async def attendance_report(
     request: Request,
     event_id: UUID,
     include_without_ticket: bool = Query(default=True),
+    search: str | None = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db_session),
     admin: User = Depends(require_admin),
 ):
@@ -54,8 +58,13 @@ async def attendance_report(
         session=db,
         event_id=event_id,
         include_without_ticket=include_without_ticket,
+        search=search,
     )
-    return success_response("Laporan kehadiran event ditemukan", data=report.model_dump(), request=request)
+    meta = pagination_meta(page, size, len(report.attendees))
+    report.attendees = report.attendees[(page - 1) * size:page * size]
+    data = report.model_dump()
+    data["registrants"] = data["attendees"]
+    return success_response("Laporan kehadiran event ditemukan", data=data, meta=meta, request=request)
 
 
 @router.get("/events/{event_id}/roster/{registration_id}", summary="Detail registran attendance")

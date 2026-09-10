@@ -46,11 +46,13 @@ class AttendanceService:
         session: AsyncSession,
         event_id: UUID,
         include_without_ticket: bool = True,
+        search: str | None = None,
     ) -> schemas.AttendanceReport:
         attendees = await attendance_repo.AttendanceRepository.list_event_attendees(
             session=session,
             event_id=event_id,
             include_without_ticket=include_without_ticket,
+            search=search,
         )
         total_registered = len(attendees)
         total_checked_in = sum(1 for row in attendees if row["is_checked_in"])

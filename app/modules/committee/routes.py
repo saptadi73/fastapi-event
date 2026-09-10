@@ -26,8 +26,8 @@ async def list_public_committee(event_id: UUID, request: Request, page: int = Qu
 
 
 @admin_router.get("", summary="List committee members for admin")
-async def list_admin_committee(request: Request, event_id: UUID, page: int = Query(1, ge=1), size: int = Query(100, ge=1, le=200), db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
-    rows, total = await CommitteeService.list_for_event(db, event_id, published_only=False, page=page, size=size)
+async def list_admin_committee(request: Request, event_id: UUID, search: str | None = None, page: int = Query(1, ge=1), size: int = Query(100, ge=1, le=200), db: AsyncSession = Depends(get_db_session), admin=Depends(require_admin)):
+    rows, total = await CommitteeService.list_for_event(db, event_id, published_only=False, page=page, size=size, search=search)
     data = await localize_models(db, "committee_member", rows, request_locale(request))
     pages = (total + size - 1) // size if total else 0
     return success_response("Committee admin ditemukan", data=data, meta={"page": page, "size": size, "total": total, "pages": pages}, request=request)

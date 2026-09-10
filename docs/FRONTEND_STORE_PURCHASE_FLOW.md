@@ -314,6 +314,25 @@ backend menggunakan seluruh sisa tagihan. Jika peserta sebelumnya sudah sukses
 membayar sebagian di gateway, jangan kirim total awal; tampilkan sisa dari detail
 order atau biarkan backend mengisinya.
 
+Pada halaman `/admin/manual-payments`, cari peserta melalui
+`GET /api/v1/admin/reports/participants?page=1&size=100&search=anwar&locale=en`
+dengan Bearer access token admin/organizer. Simpan `registration_id` dari item
+participant terpilih sebagai parameter URL submit di atas. Jangan menggunakan
+`participant_id`, `user_id`, email, atau ID placeholder untuk parameter tersebut.
+
+`registration_id` tingkat participant adalah relasi registrasi pertama yang
+tidak `null` dari `packages` hasil filter. Setiap package juga menyediakan
+`registration_id` dari order-nya. Jika peserta memiliki beberapa registrasi,
+pastikan registrasi yang dipilih sesuai event dan pembelian tujuan.
+
+Jika `registration_id` bernilai `null`, nonaktifkan submit pembayaran dan
+tampilkan bahwa registrasi untuk pembayaran perlu dipilih atau dilengkapi.
+Nilai ini dapat kosong karena order belum terhubung ke registrasi; jangan
+membentuk URL `/registrations/null/offline-payments`. Tangani kegagalan search
+(`401`, `403`, atau error lain) dengan mengakhiri loading dan menampilkan error.
+Contoh respons tersedia di
+[panduan offline payment](OFFLINE_REGISTRATION_PAYMENT.md#participant-search-for-manual-payments).
+
 Response sukses berisi `order`, `payment`, dan `ticket`, sehingga admin dapat
 langsung merender atau mencetak ticket. Endpoint ini berbeda dari rekonsiliasi
 webhook hilang: transaksi gateway yang sebenarnya sukses tetap dikonfirmasi lewat

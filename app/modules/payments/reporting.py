@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.support.search import search_filter
 from app.modules.events.models import Event
 from app.modules.iwbif.models import DelegatePackage, DelegateRegistrationDetail
 from app.modules.payments.models import Order, Payment, PaymentProof, PaymentStatus, payment_allowed_actions
@@ -47,6 +48,7 @@ class PaymentReportingService:
         package_id: UUID | None = None,
         provider: str | None = "doku",
         include_deleted: bool = False,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
         effective_at = func.coalesce(Payment.paid_at, Payment.created_at)
         registration_user = aliased(User, name="registration_user")
@@ -161,6 +163,12 @@ class PaymentReportingService:
         if package_id:
             stmt = stmt.where(effective_package_id == package_id)
 
+        stmt = stmt.where(search_filter(search, *(stmt.selected_columns[name] for name in (
+            "order_number", "order_id", "customer_name", "customer_email", "registration_number",
+            "provider", "channel_code", "payment_type", "provider_transaction_id",
+            "provider_order_id", "provider_reference_no", "package_code", "package_name",
+            "transaction_status", "order_status",
+        ))))
         result = await session.execute(stmt)
         rows = [dict(row._mapping) for row in result.all()]
         payment_ids = [row["payment_id"] for row in rows]

@@ -5,12 +5,13 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.i18n import normalize_locale
 from app.modules.content_translations.models import ContentTranslation
+from app.support.search import search_filter
 
 
 TRANSLATABLE_FIELDS: dict[str, frozenset[str]] = {
@@ -30,6 +31,30 @@ TRANSLATABLE_FIELDS: dict[str, frozenset[str]] = {
     "meeting_venue": frozenset({"name", "location_description"}),
     "meeting_resource": frozenset({"name"}),
 }
+
+
+def translated_search_filter(search: str | None, entity_type: str, entity_id, *columns):
+    """Search source fields and their translations across supported locales.
+
+    EXISTS preserves one result per entity, including when multiple translations
+    match. Only translated counterparts of the requested search fields are used.
+    """
+    if not (search or "").strip():
+        return True
+    translated_fields = [
+        ContentTranslation.fields[column.key].as_string()
+        for column in columns
+        if column.key in TRANSLATABLE_FIELDS[entity_type]
+    ]
+    source = search_filter(search, *columns)
+    if not translated_fields:
+        return source
+    translation = select(ContentTranslation.id).where(
+        ContentTranslation.entity_type == entity_type,
+        ContentTranslation.entity_id == entity_id,
+        search_filter(search, *translated_fields),
+    ).exists()
+    return or_(source, translation)
 
 
 def _model_for(entity_type: str):

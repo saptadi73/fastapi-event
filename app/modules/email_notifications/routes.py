@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import search_filter, paginate_query
 from app.core.dependencies import get_db_session, require_admin
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.i18n import normalize_locale
@@ -133,9 +134,12 @@ async def test_send(event_id: UUID, trigger: str, payload: schemas.TestSendReque
 
 
 @router.get("/logs/history")
-async def delivery_logs(event_id: UUID, request: Request, limit: int = 100, locale: str | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
+async def delivery_logs(event_id: UUID, request: Request, limit: int = Query(100, ge=1, le=500), search: str | None = None, status: str | None = None, page: int = Query(1, ge=1), size: int | None = Query(None, ge=1, le=500), locale: str | None = None, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)):
     stmt = select(EmailNotificationLog).where(EmailNotificationLog.event_id == event_id)
     if locale:
         stmt = stmt.where(EmailNotificationLog.locale == normalize_locale(locale))
-    rows = (await db.execute(stmt.order_by(EmailNotificationLog.created_at.desc()).limit(min(max(limit, 1), 500)))).scalars().all()
-    return success_response("Riwayat pengiriman email ditemukan", [schemas.LogRead.model_validate(row) for row in rows], request=request)
+    if status and status.strip():
+        stmt = stmt.where(EmailNotificationLog.status == status.strip().lower())
+    stmt = stmt.where(search_filter(search, EmailNotificationLog.recipient, EmailNotificationLog.subject, EmailNotificationLog.trigger, EmailNotificationLog.status, EmailNotificationLog.entity_type, EmailNotificationLog.entity_id, EmailNotificationLog.error_message))
+    rows, meta = await paginate_query(db, stmt.order_by(EmailNotificationLog.created_at.desc(), EmailNotificationLog.id), page, size or limit)
+    return success_response("Riwayat pengiriman email ditemukan", [schemas.LogRead.model_validate(row) for row in rows], meta=meta, request=request)

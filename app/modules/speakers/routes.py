@@ -4,12 +4,15 @@ from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.support.search import paginate_query
+from sqlalchemy import select
+from app.modules.speakers.models import Speaker
 from app.core.dependencies import get_current_user, get_db_session, require_admin
 from app.support.responses import success_response
 from app.modules.speakers import schemas
 from app.modules.speakers.service import SpeakerService
 from app.core.i18n import request_locale
-from app.modules.content_translations.service import localize_models
+from app.modules.content_translations.service import localize_models, translated_search_filter
 
 router = APIRouter(prefix="/speakers", tags=["speakers"])
 logger = logging.getLogger(__name__)
@@ -20,11 +23,13 @@ async def list_speakers(
     request: Request,
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    search: str | None = None,
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await SpeakerService.list(db, page=page, size=size)
+    stmt = select(Speaker).where(translated_search_filter(search, "speaker", Speaker.id, Speaker.full_name, Speaker.organization_name)).order_by(Speaker.created_at, Speaker.id)
+    rows, meta = await paginate_query(db, stmt, page, size)
     data = await localize_models(db, "speaker", rows, request_locale(request))
-    return success_response("List speaker berhasil", data=data, request=request, meta={"page": page, "size": size, "total": len(data), "pages": 1})
+    return success_response("List speaker berhasil", data=data, request=request, meta=meta)
 
 
 @router.get("/{speaker_id}", summary="Get speaker")

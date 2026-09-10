@@ -6,13 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException
 from app.modules.committee import schemas
 from app.modules.committee.models import CommitteeMember
+from app.modules.content_translations.service import translated_search_filter
 from app.modules.events.models import Event
 
 
 class CommitteeService:
     @staticmethod
-    async def list_for_event(db: AsyncSession, event_id: UUID, *, published_only: bool, page: int, size: int):
-        filters = [CommitteeMember.event_id == event_id]
+    async def list_for_event(db: AsyncSession, event_id: UUID, *, published_only: bool, page: int, size: int, search: str | None = None):
+        filters = [CommitteeMember.event_id == event_id, translated_search_filter(search, "committee_member", CommitteeMember.id, CommitteeMember.full_name, CommitteeMember.role_title, CommitteeMember.committee_group, CommitteeMember.organization_name)]
         if published_only:
             filters.append(CommitteeMember.status == "published")
         total = int((await db.execute(select(func.count(CommitteeMember.id)).where(*filters))).scalar_one())
