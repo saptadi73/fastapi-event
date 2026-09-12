@@ -1,5 +1,20 @@
 # Production database migration
 
+## User payment history cleanup
+
+Rilis fitur hapus percobaan pembayaran membutuhkan revision `202609120046`
+(parent `202609120045`). Migrasi menambahkan kolom nullable
+`payments.hidden_from_user_at`, tanpa menghapus transaksi atau mengubah saldo.
+Terapkan migrasi sebelum mengaktifkan backend baru, lalu rilis frontend.
+Verifikasi revision dengan `alembic current`; revision harus `202609120046`
+atau turunannya yang memuat migrasi ini.
+
+Rollback aplikasi dapat membiarkan kolom tambahan tetap ada. Downgrade database
+melewati revision ini menghapus penanda tersembunyi dan menampilkan kembali
+percobaan lama. Jangan hapus kolom ketika backend baru masih berjalan.
+Detail kontrak dan verifikasi tersedia pada
+[User payment history cleanup](USER_PAYMENT_HISTORY_CLEANUP.md).
+
 > Untuk rilis segmented QRIS/payment, ikuti urutan produksi lengkap pada
 > `docs/SEGMENTED_QRIS_PAYMENT_IMPLEMENTATION.md`. Checkout harus dibekukan selama
 > pergantian karena backend lama menganggap satu payment sukses sebagai pelunasan

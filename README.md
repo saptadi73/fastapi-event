@@ -42,6 +42,11 @@ soft-cancel melalui `DELETE /api/v1/orders/{order_id}` tanpa menghapus riwayat
 payment attempt.
 Kontrak lengkap tersedia di `docs/API_REFERENCE.md`.
 
+User dengan order lunas dapat memilih beberapa percobaan pembayaran untuk
+dihapus dari riwayat melalui **Delete selected**. Pembayaran sukses/refund
+tetap terlihat dan catatan finansial tetap tersimpan. Kontrak, alur frontend,
+serta migrasi tersedia di [Hapus riwayat percobaan pembayaran](docs/USER_PAYMENT_HISTORY_CLEANUP.md).
+
 Form exhibitor menggunakan **Booth number requested** dengan pilihan 1–40.
 Field API tetap `booth_size_requested` dan berisi nomor sebagai string.
 User yang sudah memiliki registrasi exhibitor atau order exhibitor aktif,

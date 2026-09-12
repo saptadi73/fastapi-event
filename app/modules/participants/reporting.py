@@ -31,6 +31,17 @@ def _metadata_package_id(product: Product | None) -> UUID | None:
         return None
 
 
+PROFILE_FIELDS = ("full_name", "organization_name", "biography", "profile_photo_url")
+PROFILE_STATUSES = {"not_started", "partial", "complete"}
+
+
+def profile_status(profile):
+    filled = {field for field in PROFILE_FIELDS if str(getattr(profile, field, None) or "").strip()}
+    missing = [field for field in PROFILE_FIELDS if field not in filled]
+    status = "complete" if not missing else "partial" if filled - {"full_name"} else "not_started"
+    return {"profile_status": status, "profile_missing_fields": missing}
+
+
 class ParticipantReportingService:
     @staticmethod
     async def rows(
@@ -40,12 +51,14 @@ class ParticipantReportingService:
         package_id: UUID | None = None,
         payment_status: str | None = None,
         search: str | None = None,
+        profile_status_filter: str | None = None,
     ) -> list[dict]:
         participant_stmt = (
             select(ParticipantProfile, User)
-            .join(User, User.id == ParticipantProfile.user_id)
+            .select_from(User)
+            .outerjoin(ParticipantProfile, User.id == ParticipantProfile.user_id)
             .where(User.role == "participant")
-            .order_by(ParticipantProfile.created_at.asc(), ParticipantProfile.id.asc())
+            .order_by(User.created_at.asc(), User.id.asc())
         )
         if search and search.strip():
             term = f"%{search.strip()}%"
@@ -53,6 +66,7 @@ class ParticipantReportingService:
                 ParticipantProfile.full_name.ilike(term),
                 ParticipantProfile.organization_name.ilike(term),
                 User.email.ilike(term),
+                User.full_name.ilike(term),
             ))
         participant_rows = (await db.execute(participant_stmt)).all()
         if not participant_rows:
@@ -125,6 +139,9 @@ class ParticipantReportingService:
         result = []
         normalized_status = payment_status.strip().lower() if payment_status else None
         for participant, user in participant_rows:
+            completion = profile_status(participant)
+            if profile_status_filter and completion["profile_status"] != profile_status_filter:
+                continue
             purchases = []
             for order in orders_by_user.get(user.id, []):
                 payment = payments_by_order.get(order.id)
@@ -152,14 +169,15 @@ class ParticipantReportingService:
             if purchases or not any((event_id, package_id, normalized_status)):
                 registration_id = next((purchase.get("registration_id") for purchase in purchases if purchase.get("registration_id")), None)
                 result.append({
-                    "participant_id": str(participant.id),
+                    "participant_id": str(participant.id) if participant else None,
+                    **completion,
                     "registration_id": registration_id,
                     "user_id": str(user.id),
-                    "full_name": participant.full_name,
+                    "full_name": participant.full_name if participant else user.full_name,
                     "email": user.email,
                     "phone": user.phone,
                     "country": user.country,
-                    "organization_name": participant.organization_name,
+                    "organization_name": participant.organization_name if participant else None,
                     "registration_status": user.registration_status,
                     "packages": purchases,
                 })
@@ -203,6 +221,7 @@ class ParticipantReportingService:
         output = io.StringIO(newline="")
         columns = [
             "participant_id", "registration_id", "full_name", "email", "phone", "country", "organization_name",
+            "profile_status", "profile_missing_fields",
             "event_id", "package_id", "package_code", "package_name", "package_type", "quantity",
             "unit_price", "line_total", "currency", "order_id", "order_number", "order_status",
             "payment_id", "payment_status", "payment_provider", "paid_at",
@@ -211,6 +230,7 @@ class ParticipantReportingService:
         writer.writeheader()
         for participant in rows:
             common = {key: participant.get(key) for key in columns if key in participant}
+            common["profile_missing_fields"] = ", ".join(participant.get("profile_missing_fields", []))
             if participant["packages"]:
                 for package in participant["packages"]:
                     writer.writerow({**common, **package})

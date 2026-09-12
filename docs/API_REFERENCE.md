@@ -2749,16 +2749,19 @@ memiliki title/nationality. Perubahan ini hanya menghapusnya dari profil delegat
 
 ## Hapus percobaan pembayaran setelah lunas
 
+Panduan lengkap beserta contoh request/response, penanganan error, dan urutan
+deployment: [Hapus riwayat percobaan pembayaran](USER_PAYMENT_HISTORY_CLEANUP.md).
+
 `POST /api/v1/orders/{order_id}/payment-attempts/delete` membutuhkan login
 pemilik order. Body:
 
 ```json
-{"payment_ids":["payment-uuid-1","payment-uuid-2"]}
+{"payment_ids":["3eb77361-a806-4e56-b0c2-adfa0c6f0271","c5748a39-7661-4cd7-8cd3-bb80d1dc2978"]}
 ```
 
 Pilih 1-100 ID per request. Semua ID harus berada di order yang sama milik user.
 Order harus berstatus `paid` dan saldo tersisa berdasarkan pembayaran sukses
-harus nol. Percobaan berstatus `created`, `pending`, `failed`, `expired`, atau
+harus nol, dengan jumlah pembayaran sukses lebih dari nol. Percobaan berstatus `created`, `pending`, `failed`, `expired`, atau
 `canceled` dapat dihapus dari riwayat user. Pembayaran `success` dan `refunded`
 tidak dapat dihapus. Validasi dilakukan untuk seluruh pilihan sebelum perubahan;
 request yang berisi ID tidak valid ditolak tanpa menghapus sebagian pilihan.

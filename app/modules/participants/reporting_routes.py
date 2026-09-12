@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_db_session, require_admin
 from app.core.exceptions import ValidationException
-from app.modules.participants.reporting import ParticipantReportingService
+from app.modules.participants.reporting import ParticipantReportingService, PROFILE_STATUSES
 from app.modules.payments.reporting import PAYMENT_STATUSES
 from app.modules.users.models import User
 from app.support.responses import success_response
@@ -16,16 +16,19 @@ from app.support.responses import success_response
 router = APIRouter(prefix="/admin/reports/participants", tags=["admin-participant-reports"])
 
 
-async def _rows(db, event_id, package_id, payment_status, search):
+async def _rows(db, event_id, package_id, payment_status, search, profile_status=None):
     normalized_status = payment_status.strip().lower() if payment_status else None
     if normalized_status and normalized_status not in PAYMENT_STATUSES:
         raise ValidationException("INVALID_PAYMENT_STATUS", "Status pembayaran tidak valid")
+    if profile_status and profile_status not in PROFILE_STATUSES:
+        raise ValidationException("INVALID_PROFILE_STATUS", "Status profil tidak valid")
     return await ParticipantReportingService.rows(
         db,
         event_id=event_id,
         package_id=package_id,
         payment_status=normalized_status,
         search=search,
+        profile_status_filter=profile_status,
     )
 
 
@@ -36,12 +39,13 @@ async def participant_report(
     package_id: UUID | None = Query(default=None),
     payment_status: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    profile_status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=200),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _rows(db, event_id, package_id, payment_status, search)
+    rows = await _rows(db, event_id, package_id, payment_status, search, profile_status)
     total = len(rows)
     offset = (page - 1) * size
     return success_response(
@@ -58,10 +62,11 @@ async def participant_report_csv(
     package_id: UUID | None = Query(default=None),
     payment_status: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    profile_status: str | None = Query(default=None),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = await _rows(db, event_id, package_id, payment_status, search)
+    rows = await _rows(db, event_id, package_id, payment_status, search, profile_status)
     filename = f"participant-packages-{datetime.now().date().isoformat()}.csv"
     return Response(
         ParticipantReportingService.csv(rows),
