@@ -497,3 +497,21 @@ registration belum boleh dikonfirmasi karena order tertaut belum paid.
   request, and the unpaid-order gate. Frontend lint and Vue compilation passed.
 - Deploy the backend before the frontend. No production account records were
   changed; existing drafts must still be submitted through the completed flow.
+
+## Pembaruan profil delegate (12 September 2026)
+
+Form create/edit profil delegate tidak lagi memuat `title`, `full_name`,
+`nationality`, atau `email`. Hapus input, validasi wajib, prefill, dan keempat
+key tersebut dari payload frontend. Schema `DelegateRegistrationWrite` dan
+response `detail` tidak menyertakannya; key dari client lama diabaikan.
+Registrasi user tidak berubah dan tidak ditambah field baru.
+
+Backend membuat participant otomatis dari akun login; nama memakai
+`users.full_name`, dengan fallback `users.email` jika nama belum tersedia.
+Frontend tidak perlu memanggil PUT profil participant sebelum membuat delegate.
+Kolom identitas delegate lama dipertahankan sebagai data historis nullable,
+tanpa mewajibkan duplikasi untuk registrasi baru. Jalankan `alembic upgrade head`
+sebelum menjalankan backend baru. Tidak ada penghapusan massal data lama.
+
+Catatan: backend akun saat ini memiliki email dan nama opsional, tetapi belum
+memiliki title/nationality. Perubahan ini hanya menghapusnya dari profil delegate.

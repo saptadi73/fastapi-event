@@ -104,7 +104,7 @@ class IwbifService:
             raise HTTPException(401, "Authenticated user not found")
         row = ParticipantProfile(
             user_id=user.id,
-            full_name=full_name or user.full_name,
+            full_name=full_name or user.full_name or user.email,
             organization_name=organization_name,
         )
         db.add(row)
@@ -145,7 +145,7 @@ class IwbifService:
 
     @staticmethod
     async def create_registration(db: AsyncSession, event_id: UUID, user_id: UUID, payload):
-        participant = await IwbifService.resolve_participant(db, user_id, payload.participant_id, full_name=payload.full_name, organization_name=payload.company_organization)
+        participant = await IwbifService.resolve_participant(db, user_id, payload.participant_id, organization_name=payload.company_organization)
         if not await db.get(Event, event_id): raise NotFoundException("EVENT_NOT_FOUND", "Event tidak ditemukan")
         package, purchased_order = await IwbifService.resolve_purchased_delegate_package(
             db, event_id, user_id, payload.delegate_package_id,
@@ -210,7 +210,8 @@ class IwbifService:
     @staticmethod
     def serialize_registration(reg, detail):
         values = {c.name: getattr(detail, c.name) for c in detail.__table__.columns} if detail else {}
-        values.pop("registration_id", None)
+        for key in ("registration_id", "full_name", "title", "nationality", "email"):
+            values.pop(key, None)
         return {"id": reg.id, "event_id": reg.event_id, "participant_id": reg.participant_id, "registration_number": reg.registration_number, "status": reg.status.value if hasattr(reg.status, "value") else reg.status, "detail": values}
 
     @staticmethod

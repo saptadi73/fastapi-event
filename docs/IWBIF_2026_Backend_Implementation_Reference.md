@@ -67,11 +67,8 @@ Catatan: source hanya menyatakan confirmation dan payment instructions dikirim s
 
 | API Field | Type | Required | Values/Notes |
 |---|---|---:|---|
-| full_name | string | Yes | |
 | job_title | string | Yes | |
 | company_organization | string | Yes | |
-| nationality | string | Yes | |
-| title | enum/string | Yes | Mrs, Ms, Dr, Prof, Mr, Others |
 | business_sector | enum/master | Yes | see below |
 | country | enum/master | Yes | see below |
 
@@ -111,7 +108,6 @@ Countries in source:
 
 | API Field | Type | Required |
 |---|---|---:|
-| email | email/string | Yes |
 | office_phone | string/null | No |
 | company_website | URL/string/null | No |
 | linkedin | URL/string/null | No |
@@ -678,3 +674,21 @@ Lihat `FRONTEND_DOKU_PAYMENT_INTEGRATION.md` untuk kontrak frontend.
 ## Data Security
 
 Passport dan data special requirements membutuhkan authorization ketat. File tidak sebaiknya memiliki public URL permanen. Gunakan protected download atau signed/temporary URL bila storage mendukungnya.
+
+## Pembaruan profil delegate (12 September 2026)
+
+Form create/edit profil delegate tidak lagi memuat `title`, `full_name`,
+`nationality`, atau `email`. Hapus input, validasi wajib, prefill, dan keempat
+key tersebut dari payload frontend. Schema `DelegateRegistrationWrite` dan
+response `detail` tidak menyertakannya; key dari client lama diabaikan.
+Registrasi user tidak berubah dan tidak ditambah field baru.
+
+Backend membuat participant otomatis dari akun login; nama memakai
+`users.full_name`, dengan fallback `users.email` jika nama belum tersedia.
+Frontend tidak perlu memanggil PUT profil participant sebelum membuat delegate.
+Kolom identitas delegate lama dipertahankan sebagai data historis nullable,
+tanpa mewajibkan duplikasi untuk registrasi baru. Jalankan `alembic upgrade head`
+sebelum menjalankan backend baru. Tidak ada penghapusan massal data lama.
+
+Catatan: backend akun saat ini memiliki email dan nama opsional, tetapi belum
+memiliki title/nationality. Perubahan ini hanya menghapusnya dari profil delegate.

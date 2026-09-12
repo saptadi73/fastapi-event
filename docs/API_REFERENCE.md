@@ -626,10 +626,10 @@ PATCH /api/v1/events/{event_id}/registrations/{registration_id}
 
 ```json
 {
-  "full_name":"Delegate Name","job_title":"Director",
+  "job_title":"Director",
   "company_organization":"Example Company",
-  "nationality":"Indonesian","title":"Ms.","business_sector":"Technology",
-  "email":"delegate@example.com","office_phone":null,
+  "business_sector":"Technology",
+  "office_phone":null,
   "company_website":"https://example.com","linkedin":null,
   "company_address":"Jakarta","participation_categories":["Delegate","Buyer"],
   "presentation_topic":null,"products_interested":"Digital commerce",
@@ -652,7 +652,7 @@ dari local storage ke payload ini.
 Response:
 
 ```json
-{"id":"uuid","event_id":"uuid","participant_id":"uuid","registration_number":"IWBIF-XXXXXXXXXX","status":"draft","detail":{"delegate_package_id":"uuid","full_name":"Delegate Name"}}
+{"id":"uuid","event_id":"uuid","participant_id":"uuid","registration_number":"IWBIF-XXXXXXXXXX","status":"draft","detail":{"delegate_package_id":"uuid","job_title":"Director"}}
 ```
 
 Lifecycle:
@@ -2728,3 +2728,21 @@ Dokumen tambahan:
 - `docs/FRONTEND_MIDTRANS_PAYMENT_INTEGRATION.md`
 - `docs/FRONTEND_STORE_PURCHASE_FLOW.md`
 - `docs/DOKU_SNAP_SANDBOX_SETUP.md`
+
+## Pembaruan profil delegate (12 September 2026)
+
+Form create/edit profil delegate tidak lagi memuat `title`, `full_name`,
+`nationality`, atau `email`. Hapus input, validasi wajib, prefill, dan keempat
+key tersebut dari payload frontend. Schema `DelegateRegistrationWrite` dan
+response `detail` tidak menyertakannya; key dari client lama diabaikan.
+Registrasi user tidak berubah dan tidak ditambah field baru.
+
+Backend membuat participant otomatis dari akun login; nama memakai
+`users.full_name`, dengan fallback `users.email` jika nama belum tersedia.
+Frontend tidak perlu memanggil PUT profil participant sebelum membuat delegate.
+Kolom identitas delegate lama dipertahankan sebagai data historis nullable,
+tanpa mewajibkan duplikasi untuk registrasi baru. Jalankan `alembic upgrade head`
+sebelum menjalankan backend baru. Tidak ada penghapusan massal data lama.
+
+Catatan: backend akun saat ini memiliki email dan nama opsional, tetapi belum
+memiliki title/nationality. Perubahan ini hanya menghapusnya dari profil delegate.

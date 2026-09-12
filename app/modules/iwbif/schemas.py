@@ -11,13 +11,9 @@ class DelegateRegistrationWrite(BaseModel):
     # Resolved by the backend from the authenticated user's purchased Delegate
     # order. Kept optional for backward-compatible clients only.
     delegate_package_id: UUID | None = None
-    full_name: str = Field(min_length=2, max_length=255)
     job_title: str = Field(min_length=1, max_length=160)
     company_organization: str = Field(min_length=1, max_length=255)
-    nationality: str = Field(min_length=1, max_length=100)
-    title: str
     business_sector: str
-    email: str
     office_phone: str | None = None
     company_website: HttpUrl | None = None
     linkedin: HttpUrl | None = None
@@ -51,7 +47,6 @@ class DelegateRegistrationWrite(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_rules(self):
-        if "@" not in self.email or self.email.startswith("@") or self.email.endswith("@"): raise ValueError("Invalid email")
         allowed = [(self.business_sector, BUSINESS_SECTORS, "business_sector"), (self.room_preference, ROOM_PREFERENCES, "room_preference"), (self.airport, AIRPORTS, "airport")]
         for value, choices, name in allowed:
             if value not in choices: raise ValueError(f"Invalid {name}")
