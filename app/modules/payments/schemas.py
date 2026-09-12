@@ -20,6 +20,10 @@ class ContinueOrderPaymentRequest(BaseModel):
     provider: Literal["doku", "midtrans"]
 
 
+class DeletePaymentAttemptsRequest(BaseModel):
+    payment_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+
 class CancelOrderRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 

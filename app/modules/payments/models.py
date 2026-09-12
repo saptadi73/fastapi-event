@@ -116,6 +116,7 @@ class Payment(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     deletion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hidden_from_user_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def allowed_actions(self) -> list[str]:

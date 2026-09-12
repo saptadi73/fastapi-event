@@ -1427,6 +1427,10 @@ class PaymentService:
 
         payments = await PaymentRepository.get_payments_by_order(session, order.id)
         paid_amount, remaining_amount = await PaymentService._payment_progress(session, order)
+        # Keep hidden attempts in gateway lookup and accounting. A late settlement
+        # or refund must always become visible again in the user's history.
+        payments = [payment for payment in payments if not payment.hidden_from_user_at
+                    or payment.transaction_status in {PaymentStatus.SUCCESS, PaymentStatus.REFUNDED}]
         return schemas.UserOrderDetail(
             order=schemas.OrderRead.model_validate(order),
             items=[schemas.OrderItemRead(
@@ -1474,6 +1478,36 @@ class PaymentService:
         if not order:
             raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
         return await PaymentService._user_order_detail(session, order)
+
+    @staticmethod
+    async def delete_user_payment_attempts(session, order_id, user_id, payment_ids):
+        order = await PaymentRepository.get_order_for_user(session, order_id, user_id, lock=True)
+        if not order or order.user_id != user_id:
+            raise NotFoundException("ORDER_NOT_FOUND", "Order tidak ditemukan untuk akun ini")
+        payments = await PaymentRepository.get_payments_by_order(session, order.id, lock=True)
+        paid, remaining = await PaymentService._payment_progress(session, order)
+        if order.status != OrderStatus.PAID or remaining != 0 or paid <= 0:
+            raise ConflictException("ORDER_NOT_FULLY_PAID", "Percobaan pembayaran hanya dapat dihapus setelah order lunas")
+        selected_ids = set(payment_ids)
+        selected = [payment for payment in payments if payment.id in selected_ids]
+        if len(selected) != len(selected_ids):
+            raise NotFoundException("PAYMENT_NOT_FOUND", "Percobaan pembayaran tidak ditemukan pada order ini")
+        removable = {PaymentStatus.CREATED, PaymentStatus.PENDING, PaymentStatus.FAILED,
+                     PaymentStatus.EXPIRED, PaymentStatus.CANCELED}
+        if any(payment.transaction_status not in removable for payment in selected):
+            raise ConflictException("PAYMENT_DELETE_FORBIDDEN", "Pembayaran sukses atau refund tidak dapat dihapus")
+        now = datetime.now(timezone.utc)
+        for payment in selected:
+            if payment.hidden_from_user_at is not None:
+                continue
+            payment.hidden_from_user_at = now
+            session.add(PaymentWebhookEvent(
+                payment_id=payment.id, provider=payment.provider,
+                request_id=f"user-hide-{uuid.uuid4().hex}", event_status="USER_HIDDEN",
+                payload={"hidden_by": str(user_id), "hidden_at": now.isoformat()},
+            ))
+        await session.commit()
+        return sorted(selected_ids, key=str)
 
     @staticmethod
     async def cancel_user_order(

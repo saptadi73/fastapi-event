@@ -386,6 +386,20 @@ async def get_my_order_detail(
     return success_response("Detail order ditemukan", data=detail, request=request)
 
 
+@router.post("/orders/{order_id}/payment-attempts/delete", summary="Remove selected attempts from own fully paid order history")
+async def delete_my_payment_attempts(
+    order_id: uuid.UUID,
+    payload: schemas.DeletePaymentAttemptsRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    payment_ids = await PaymentService.delete_user_payment_attempts(
+        db, order_id, current_user.id, payload.payment_ids,
+    )
+    return success_response("Percobaan pembayaran dihapus dari riwayat", data={"payment_ids": payment_ids}, request=request)
+
+
 @router.post("/orders/{order_id}/continue-payment", summary="Continue payment for an existing unpaid order")
 async def continue_order_payment(
     order_id: uuid.UUID,

@@ -515,3 +515,36 @@ sebelum menjalankan backend baru. Tidak ada penghapusan massal data lama.
 
 Catatan: backend akun saat ini memiliki email dan nama opsional, tetapi belum
 memiliki title/nationality. Perubahan ini hanya menghapusnya dari profil delegate.
+
+## Hapus percobaan pembayaran setelah lunas
+
+`POST /api/v1/orders/{order_id}/payment-attempts/delete` membutuhkan login
+pemilik order. Body:
+
+```json
+{"payment_ids":["payment-uuid-1","payment-uuid-2"]}
+```
+
+Pilih 1-100 ID per request. Semua ID harus berada di order yang sama milik user.
+Order harus berstatus `paid` dan saldo tersisa berdasarkan pembayaran sukses
+harus nol. Percobaan berstatus `created`, `pending`, `failed`, `expired`, atau
+`canceled` dapat dihapus dari riwayat user. Pembayaran `success` dan `refunded`
+tidak dapat dihapus. Validasi dilakukan untuk seluruh pilihan sebelum perubahan;
+request yang berisi ID tidak valid ditolak tanpa menghapus sebagian pilihan.
+Pengulangan ID atau request yang sama tidak membuat audit duplikat.
+
+Response sukses: `data.payment_ids` berisi ID yang dihapus dari riwayat.
+Error: `ORDER_NOT_FOUND` / `PAYMENT_NOT_FOUND` (404),
+`ORDER_NOT_FULLY_PAID` / `PAYMENT_DELETE_FORBIDDEN` (409), atau validasi body (422).
+
+Frontend menampilkan checkbox dan tombol **Delete selected** pada order lunas
+di cart, payment, dan payment status. Setelah konfirmasi dan response sukses,
+hapus ID tersebut dari daftar lokal. Muat ulang memakai GET `/orders` atau
+GET `/orders/{order_id}/detail`; kedua response menyaring percobaan tersembunyi.
+
+Implementasi menggunakan `payments.hidden_from_user_at` dan audit `USER_HIDDEN`.
+Ini tidak membatalkan checkout di provider, tidak menghapus catatan finansial,
+dan tidak mengubah saldo, invoice, tiket, maupun pemrosesan webhook. Jika ada
+konfirmasi pembayaran terlambat yang mengubah status menjadi sukses/refund,
+catatan tersebut kembali terlihat setelah refresh. Data tetap tersedia untuk admin.
+Migrasi `202609120046` harus diterapkan (`alembic upgrade head`) sebelum deploy backend.
