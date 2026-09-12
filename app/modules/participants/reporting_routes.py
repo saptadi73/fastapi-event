@@ -73,3 +73,15 @@ async def participant_report_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/{participant_id}/profile")
+async def complete_participant_profile(
+    participant_id: UUID,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    from app.modules.participants.profile_report import participant_profile_report
+    data = await participant_profile_report(db, participant_id)
+    return success_response("Profil lengkap peserta berhasil diambil", data=data, request=request)
