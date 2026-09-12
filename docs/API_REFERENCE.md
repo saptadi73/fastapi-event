@@ -2054,6 +2054,14 @@ GET /api/v1/admin/reports/participants.csv
 Authorization: Bearer <admin_access_token>
 ```
 
+Status `profile_status` adalah `complete` (sudah isi) jika `full_name`,
+`organization_name`, dan `biography` terisi setelah whitespace diabaikan.
+Foto profil opsional dan tidak masuk `profile_missing_fields`. Status `partial`
+berarti ada organisasi, biografi, atau foto, tetapi field utama belum lengkap;
+`not_started` berarti belum ada isian tersebut (nama saja belum cukup).
+Aturan ini berlaku untuk JSON, CSV, dan filter `profile_status`
+(`not_started`, `partial`, atau `complete`).
+
 Query parameter opsional:
 
 - `event_id`: UUID event yang package-nya ingin ditampilkan.

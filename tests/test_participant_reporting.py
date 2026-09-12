@@ -41,6 +41,8 @@ def test_participant_csv_keeps_multiple_packages_as_separate_rows():
     ({'full_name': 'Name', 'biography': '  '}, 'not_started'),
     ({'full_name': 'Name', 'organization_name': 'Org'}, 'partial'),
     ({'profile_photo_url': '/photo.jpg'}, 'partial'),
+    ({'full_name': 'Name', 'organization_name': 'Org', 'biography': 'Partnership', 'profile_photo_url': None}, 'complete'),
+    ({'full_name': 'Name', 'organization_name': 'Org', 'biography': 'Partnership', 'profile_photo_url': '  '}, 'complete'),
     ({field: 'filled' for field in PROFILE_FIELDS}, 'complete'),
 ])
 def test_profile_completion(values, expected):
@@ -80,8 +82,8 @@ def test_invalid_profile_filter_is_rejected():
 
 
 def test_csv_repeats_profile_status_for_each_package():
-    rows = [{'profile_status': 'partial', 'profile_missing_fields': ['biography', 'profile_photo_url'], 'packages': [{'package_code': 'A'}, {'package_code': 'B'}]}]
+    rows = [{'profile_status': 'partial', 'profile_missing_fields': ['biography'], 'packages': [{'package_code': 'A'}, {'package_code': 'B'}]}]
     exported = list(csv.DictReader(io.StringIO(ParticipantReportingService.csv(rows))))
     assert len(exported) == 2
     assert all(row['profile_status'] == 'partial' for row in exported)
-    assert all(row['profile_missing_fields'] == 'biography, profile_photo_url' for row in exported)
+    assert all(row['profile_missing_fields'] == 'biography' for row in exported)

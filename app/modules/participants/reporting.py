@@ -31,14 +31,16 @@ def _metadata_package_id(product: Product | None) -> UUID | None:
         return None
 
 
-PROFILE_FIELDS = ("full_name", "organization_name", "biography", "profile_photo_url")
+# A profile photo is optional and must not block report completion.
+PROFILE_FIELDS = ("full_name", "organization_name", "biography")
 PROFILE_STATUSES = {"not_started", "partial", "complete"}
 
 
 def profile_status(profile):
     filled = {field for field in PROFILE_FIELDS if str(getattr(profile, field, None) or "").strip()}
     missing = [field for field in PROFILE_FIELDS if field not in filled]
-    status = "complete" if not missing else "partial" if filled - {"full_name"} else "not_started"
+    has_progress = bool(filled - {"full_name"}) or bool(str(getattr(profile, "profile_photo_url", None) or "").strip())
+    status = "complete" if not missing else "partial" if has_progress else "not_started"
     return {"profile_status": status, "profile_missing_fields": missing}
 
 
